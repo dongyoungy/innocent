@@ -109,23 +109,40 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     this.conn.createStatement().execute(insertSql);
 
     List<String> statTableColumns = new ArrayList<>();
+    List<String> joinColumns = new ArrayList<>();
     for (String column : sampleColumns) {
       String type = this.getColumnType(sourceTable, column);
       statTableColumns.add(String.format("%s %s", column, type));
+      joinColumns.add(String.format("fact.%s = sample.%s", column, column));
     }
 
     final String createStatSql =
         String.format(
-            "CREATE TABLE IF NOT EXISTS %s.%s (%s, groupsize bigint) STORED AS parquet",
+            "CREATE TABLE IF NOT EXISTS %s.%s "
+                + "(%s, groupsize bigint, actualsize bigint) STORED AS parquet",
             database, sampleStatTable, Joiner.on(",").join(statTableColumns));
     System.err.println(String.format("Executing: %s", createStatSql));
     this.conn.createStatement().execute(createStatSql);
 
     String groupByClause = Joiner.on(",").join(sampleColumns);
+    String joinClause = Joiner.on(" AND ").join(joinColumns);
     final String insertStatSql =
         String.format(
-            "INSERT OVERWRITE TABLE %s.%s SELECT %s, count(*) as groupsize FROM %s GROUP BY %s",
-            database, sampleStatTable, groupByClause, sampleTable, groupByClause);
+            "INSERT OVERWRITE TABLE %s.%s SELECT %s, sample.groupsize as samplesize, "
+                + "fact.groupsize as actualsize FROM "
+                + "(SELECT %s, count(*) as groupsize FROM %s GROUP BY %s) sample, "
+                + "(SELECT %s, count(*) as groupsize FROM %s GROUP BY %s) fact "
+                + "WHERE %s",
+            database,
+            sampleStatTable,
+            sampleColumnsWithFactPrefix,
+            groupByClause,
+            sampleTable,
+            groupByClause,
+            groupByClause,
+            sourceTable,
+            groupByClause,
+            joinClause);
     System.err.println(String.format("Executing: %s", insertStatSql));
     this.conn.createStatement().execute(insertStatSql);
 
