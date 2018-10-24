@@ -18,7 +18,7 @@ import java.util.SortedSet;
 /** Created by Dong Young Yoon on 10/23/18. */
 public class ImpalaDatabase extends Database implements DatabaseImpl {
 
-  private Map<String, Object> cache;
+  private Map<String, Object> cache = new HashMap<>();
 
   public ImpalaDatabase(Connection conn) {
     this.conn = conn;
@@ -30,6 +30,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       Class.forName("com.cloudera.impala.jdbc41.Driver");
       String connString = String.format("jdbc:impala://%s/%s", host, database);
       this.conn = DriverManager.getConnection(connString, user, password);
+      this.cache = new HashMap<>();
     } catch (ClassNotFoundException e) {
       e.printStackTrace();
     } catch (SQLException e) {
