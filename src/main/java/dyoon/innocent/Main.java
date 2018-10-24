@@ -8,6 +8,7 @@ import dyoon.innocent.database.ImpalaDatabase;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.paukov.combinatorics3.Generator;
+import org.pmw.tinylog.Logger;
 
 import java.io.File;
 import java.io.IOException;
@@ -130,14 +131,14 @@ public class Main {
           String[] minRowStrings = args.getMinRows().split(",");
           for (String minRow : minRowStrings) {
             int val = Integer.parseInt(minRow.trim());
-            System.out.println("Will create stratified samples with min rows = " + val);
+            Logger.info("Will create stratified samples with min rows = {}", val);
             minRows.add(val);
           }
 
           for (SortedSet<String> sampleColumns : set) {
             for (Integer minRow : minRows) {
               Sample s = new Sample(Sample.Type.STRATIFIED, "store_sales", sampleColumns, minRow);
-              System.out.println("Creating sample: " + s.getSampleTableName());
+              Logger.info("Creating sample: {}", s.getSampleTableName());
               database.createStratifiedSample(db, s);
             }
           }
