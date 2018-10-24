@@ -178,7 +178,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     String sql =
         String.format(
             "SELECT MAX(groupsize) FROM "
-                + "(SELECT count(*) as groupsize WHERE %s FROM %s GROUP BY %s) tmp",
+                + "(SELECT count(*) as groupsize FROM %s WHERE %s GROUP BY %s) tmp",
             table, Joiner.on(" AND ").join(notNullCond), Joiner.on(",").join(groupBys));
     ResultSet rs = conn.createStatement().executeQuery(sql);
     if (rs.next()) {
