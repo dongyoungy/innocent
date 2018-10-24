@@ -138,6 +138,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     System.err.println(String.format("Executing: %s", createStatSql));
     this.conn.createStatement().execute(createStatSql);
 
+    String selectClause = Joiner.on(",").join(selectColumns);
     String groupByClause = Joiner.on(",").join(sampleColumns);
     String joinClause = Joiner.on(" AND ").join(joinColumns);
     final String insertStatSql =
@@ -149,7 +150,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
                 + "WHERE %s",
             database,
             sampleStatTable,
-            selectColumns,
+            selectClause,
             groupByClause,
             sampleTable,
             groupByClause,
