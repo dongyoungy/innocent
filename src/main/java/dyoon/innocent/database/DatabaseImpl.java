@@ -4,6 +4,7 @@ import dyoon.innocent.Sample;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 
 /** Created by Dong Young Yoon on 10/23/18. */
 public interface DatabaseImpl {
@@ -19,4 +20,6 @@ public interface DatabaseImpl {
   boolean checkTableExists(String database, String table) throws SQLException;
 
   void createStratifiedSample(String database, Sample s) throws SQLException;
+
+  long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException;
 }

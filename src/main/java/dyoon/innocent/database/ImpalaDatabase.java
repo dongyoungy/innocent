@@ -2,6 +2,7 @@ package dyoon.innocent.database;
 
 import com.google.common.base.Joiner;
 import dyoon.innocent.Sample;
+import org.pmw.tinylog.Logger;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -9,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.SortedSet;
 
 /** Created by Dong Young Yoon on 10/23/18. */
@@ -69,6 +71,16 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     String sampleStatTable = s.getSampleTableName() + "__stat";
     String sourceTable = s.getTable();
 
+    long maxGroupSize = this.getMaxGroupSize(s.getTable(), s.getColumnSet());
+    if (maxGroupSize != -1 && maxGroupSize < s.getMinRows()) {
+      Logger.warn(
+          "Sample '{}' will not be created as its max group size is {} when specified size is {}",
+          s.getSampleTableName(),
+          maxGroupSize,
+          s.getMinRows());
+      return;
+    }
+
     final List<String> factTableColumns = this.getColumns(sourceTable);
     final SortedSet<String> sampleColumns = s.getColumnSet();
     final List<String> sampleColumnsWithFactPrefix = new ArrayList<>();
@@ -108,12 +120,14 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
 
     this.conn.createStatement().execute(insertSql);
 
+    List<String> selectColumns = new ArrayList<>();
     List<String> statTableColumns = new ArrayList<>();
     List<String> joinColumns = new ArrayList<>();
     for (String column : sampleColumns) {
       String type = this.getColumnType(sourceTable, column);
       statTableColumns.add(String.format("%s %s", column, type));
       joinColumns.add(String.format("fact.%s = sample.%s", column, column));
+      selectColumns.add(String.format("fact.%s as %s", column, column));
     }
 
     final String createStatSql =
@@ -135,7 +149,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
                 + "WHERE %s",
             database,
             sampleStatTable,
-            sampleColumnsWithFactPrefix,
+            selectColumns,
             groupByClause,
             sampleTable,
             groupByClause,
@@ -152,5 +166,19 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     this.conn
         .createStatement()
         .execute(String.format("COMPUTE STATS %s.%s", database, sampleStatTable));
+  }
+
+  @Override
+  public long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException {
+    String sql =
+        String.format(
+            "SELECT MAX(groupsize) FROM "
+                + "(SELECT count(*) as groupsize FROM %s GROUP BY %s) tmp",
+            table, Joiner.on(",").join(groupBys));
+    ResultSet rs = conn.createStatement().executeQuery(sql);
+    if (rs.next()) {
+      return rs.getLong(1);
+    }
+    return -1;
   }
 }
