@@ -9,15 +9,20 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
 
 /** Created by Dong Young Yoon on 10/23/18. */
 public class ImpalaDatabase extends Database implements DatabaseImpl {
 
+  private Map<String, Object> cache;
+
   public ImpalaDatabase(Connection conn) {
     this.conn = conn;
+    this.cache = new HashMap<>();
   }
 
   public ImpalaDatabase(String host, String database, String user, String password) {
@@ -171,6 +176,10 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
 
   @Override
   public long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException {
+    String key = table + "-" + Joiner.on(",").join(groupBys) + "-maxgroupsize";
+    if (cache.containsKey(key)) {
+      return (Long) cache.get(key);
+    }
     List<String> notNullCond = new ArrayList<>();
     for (String groupBy : groupBys) {
       notNullCond.add(String.format("%s is not null", groupBy));
@@ -183,7 +192,9 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
             table, Joiner.on(" AND ").join(notNullCond), Joiner.on(",").join(groupBys));
     ResultSet rs = conn.createStatement().executeQuery(sql);
     if (rs.next()) {
-      return rs.getLong(1);
+      long val = rs.getLong(1);
+      cache.put(key, val);
+      return val;
     }
     return -1;
   }
