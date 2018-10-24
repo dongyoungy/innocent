@@ -151,6 +151,8 @@ public class Main {
       e.printStackTrace();
     } catch (SQLException e) {
       e.printStackTrace();
+    } catch (ClassNotFoundException e) {
+      e.printStackTrace();
     }
 
     System.out.println("Done.");

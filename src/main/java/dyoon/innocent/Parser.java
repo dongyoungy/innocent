@@ -12,7 +12,8 @@ import org.apache.calcite.sql.util.SqlString;
 /** Created by Dong Young Yoon on 10/19/18. */
 public class Parser {
 
-  public QueryVisitor parse(String sql) throws SqlParseException {
+  public QueryVisitor parse(String sql) throws SqlParseException, ClassNotFoundException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
     SqlParser sqlParser = SqlParser.create(sql);
     SqlNode node = sqlParser.parseQuery();
     SqlShuttle s = new SqlShuttle();
