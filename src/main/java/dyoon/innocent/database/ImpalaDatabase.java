@@ -116,7 +116,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
 
     final String createStatSql =
         String.format(
-            "CREATE TABLE IF NOT EXISTS %s.%s (%s, groupsize int) STORED AS parquet",
+            "CREATE TABLE IF NOT EXISTS %s.%s (%s, groupsize bigint) STORED AS parquet",
             database, sampleStatTable, Joiner.on(",").join(statTableColumns));
     System.err.println(String.format("Executing: %s", createStatSql));
     this.conn.createStatement().execute(createStatSql);
