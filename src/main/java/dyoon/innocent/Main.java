@@ -33,11 +33,6 @@ public class Main {
     // t3.id = t2.id) tmp), st as (select * from t3 join t4 on t3.c3 = t4.c4) SELECT count(*) as cnt
     // from customer where c_key = 1 and c_id = 2 group by c1, c2 order by c3 desc";
 
-    String host = "c220g5-110932.wisc.cloudlab.us:21050";
-    String db = "tpcds_500_parquet";
-    String user = "";
-    String password = "";
-
     Args args = new Args();
     JCommander jc = JCommander.newBuilder().addObject(args).build();
 
@@ -53,6 +48,11 @@ public class Main {
       return;
     }
 
+    String host = args.getHost();
+    String db = args.getDatabase();
+    String user = "";
+    String password = "";
+
     DatabaseImpl database = new ImpalaDatabase(host, db, user, password);
     Data data = new Data();
     Parser p = new Parser();
@@ -66,7 +66,7 @@ public class Main {
         }
       }
 
-      File tpcdsQueryDir = new File("/Users/dyoon/work/impala-tpcds-kit/queries");
+      File tpcdsQueryDir = new File(args.getQueryDir());
       File[] queryFiles = tpcdsQueryDir.listFiles();
       Arrays.sort(queryFiles);
       for (File file : queryFiles) {

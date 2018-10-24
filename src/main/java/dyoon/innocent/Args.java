@@ -25,6 +25,19 @@ public class Args {
       description = "Comma separated values for minimum rows for stratified samples")
   private String minRows = "";
 
+  @Parameter(names = "--query-dir", description = "directory where queries are")
+  private String queryDir = "/Users/dyoon/work/impala-tpcds-kit/queries";
+
+  @Parameter(
+      names = {"-d", "--database"},
+      description = "database/schema")
+  private String database = "tpcds_500_parquet";
+
+  @Parameter(
+      names = {"-h", "--host"},
+      description = "host")
+  private String host = "c220g5-110932.wisc.cloudlab.us:21050";
+
   public boolean isCreate() {
     return create;
   }
@@ -43,5 +56,17 @@ public class Args {
 
   public String getMinRows() {
     return minRows;
+  }
+
+  public String getQueryDir() {
+    return queryDir;
+  }
+
+  public String getDatabase() {
+    return database;
+  }
+
+  public String getHost() {
+    return host;
   }
 }
