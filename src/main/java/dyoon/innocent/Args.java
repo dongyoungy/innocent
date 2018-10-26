@@ -10,6 +10,9 @@ public class Args {
   @Parameter(names = "--help", help = true)
   private boolean help = false;
 
+  @Parameter(names = "--test", description = "Temporary arg for test")
+  private boolean test = false;
+
   @Parameter(
       names = "--top-n-col",
       description = "Consider top-N frequently appearing columns for each fact table")
@@ -68,5 +71,9 @@ public class Args {
 
   public String getHost() {
     return host;
+  }
+
+  public boolean isTest() {
+    return test;
   }
 }

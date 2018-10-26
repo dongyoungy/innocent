@@ -5,7 +5,10 @@ import com.beust.jcommander.ParameterException;
 import com.google.common.io.Files;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.database.ImpalaDatabase;
+import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.dialect.HiveSqlDialect;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.paukov.combinatorics3.Generator;
 import org.pmw.tinylog.Logger;
@@ -59,6 +62,107 @@ public class Main {
     Parser p = new Parser();
     File current;
     try {
+
+      // temporary section for testing query modification
+      if (args.isTest()) {
+
+        int sampleCount = 0;
+        SqlDialect dialect = new HiveSqlDialect(SqlDialect.EMPTY_CONTEXT);
+
+        //        File tpcdsQueryDir = new File(args.getQueryDir());
+        //        File[] queryFiles = tpcdsQueryDir.listFiles();
+        //        Arrays.sort(queryFiles);
+        //        for (File file : queryFiles) {
+        //          if (file.isFile()) {
+        //            if (file.getName().endsWith("sql")) {
+        //              Logger.info("Parsing: {}", file.getName());
+        //              String sql = Files.asCharSource(file, Charset.forName("UTF-8")).read();
+        //              sql = sql.replaceAll(";", "");
+        //              Logger.info(sql);
+        //              Parser parser = new Parser();
+        //              QueryVisitor v = new QueryVisitor();
+        //              Sample s =
+        //                  new Sample(
+        //                      Sample.Type.STRATIFIED,
+        //                      "store_sales",
+        //                      Arrays.asList("ss_sold_date_sk"),
+        //                      100000);
+        //              SqlNode node = parser.parse(sql, v, s);
+        //              if (parser.isSampleUsed()) {
+        //                Logger.info("Sample used for {}", file.getName());
+        //                Logger.info("Rewritten query is {}", node.toSqlString(dialect));
+        //                ++sampleCount;
+        //              }
+        //            }
+        //          }
+        //        }
+
+        String sql =
+            "with ss as\n"
+                + " (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales\n"
+                + " from store_sales,date_dim,customer_address\n"
+                + " where ss_sold_date_sk = d_date_sk\n"
+                + "  and ss_addr_sk=ca_address_sk\n"
+                + " group by ca_county,d_qoy, d_year),\n"
+                + " ws as\n"
+                + " (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales\n"
+                + " from web_sales,date_dim,customer_address\n"
+                + " where ws_sold_date_sk = d_date_sk\n"
+                + "  and ws_bill_addr_sk=ca_address_sk\n"
+                + " group by ca_county,d_qoy, d_year)\n"
+                + " select \n"
+                + "        ss1.ca_county\n"
+                + "       ,ss1.d_year\n"
+                + "       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase\n"
+                + "       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase\n"
+                + "       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase\n"
+                + "       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase\n"
+                + " from\n"
+                + "        ss ss1\n"
+                + "       ,ss ss2\n"
+                + "       ,ss ss3\n"
+                + "       ,ws ws1\n"
+                + "       ,ws ws2\n"
+                + "       ,ws ws3\n"
+                + " where\n"
+                + "    ss1.d_qoy = 1\n"
+                + "    and ss1.d_year = 2000\n"
+                + "    and ss1.ca_county = ss2.ca_county\n"
+                + "    and ss2.d_qoy = 2\n"
+                + "    and ss2.d_year = 2000\n"
+                + " and ss2.ca_county = ss3.ca_county\n"
+                + "    and ss3.d_qoy = 3\n"
+                + "    and ss3.d_year = 2000\n"
+                + "    and ss1.ca_county = ws1.ca_county\n"
+                + "    and ws1.d_qoy = 1\n"
+                + "    and ws1.d_year = 2000\n"
+                + "    and ws1.ca_county = ws2.ca_county\n"
+                + "    and ws2.d_qoy = 2\n"
+                + "    and ws2.d_year = 2000\n"
+                + "    and ws1.ca_county = ws3.ca_county\n"
+                + "    and ws3.d_qoy = 3\n"
+                + "    and ws3.d_year =2000\n"
+                + "    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end \n"
+                + "       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end\n"
+                + "    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end\n"
+                + "       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end\n"
+                + " order by ss1.d_year";
+        Parser parser = new Parser();
+        QueryVisitor v = new QueryVisitor();
+        Sample s =
+            new Sample(
+                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 100000);
+        SqlNode node = parser.parse(sql, v, s);
+        if (parser.isSampleUsed()) {
+          Logger.info("Rewritten query is {}", node.toSqlString(dialect));
+          ++sampleCount;
+        }
+
+        Logger.info("Sample used = {}", sampleCount);
+
+        System.exit(0);
+      }
+
       for (String table : database.getTables()) {
         data.addTable(table);
         List<String> columns = database.getColumns(table);
@@ -83,7 +187,8 @@ public class Main {
             //                    + "from customer where c_key = 1 and c_id = 2 group by c1, c2
             // order by c3 desc";
 
-            QueryVisitor visitor = p.parse(sql);
+            QueryVisitor visitor = new QueryVisitor();
+            p.parse(sql, visitor);
             for (SqlIdentifier id : visitor.getQueryColumnSet()) {
               data.incrementFreq(id.names.get(id.names.size() - 1));
             }
