@@ -5,14 +5,16 @@ import com.beust.jcommander.ParameterException;
 import com.google.common.io.Files;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.database.ImpalaDatabase;
-import dyoon.innocent.visitor.QueryVisitor;
-import org.apache.calcite.sql.SqlDialect;
+import dyoon.innocent.query.AggNonAggDetector;
+import dyoon.innocent.query.QueryVisitor;
 import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.dialect.HiveSqlDialect;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.paukov.combinatorics3.Generator;
+import org.pmw.tinylog.Configurator;
+import org.pmw.tinylog.Level;
 import org.pmw.tinylog.Logger;
+import org.pmw.tinylog.writers.ConsoleWriter;
+import org.pmw.tinylog.writers.FileWriter;
 
 import java.io.File;
 import java.io.IOException;
@@ -58,9 +60,12 @@ public class Main {
     String user = "";
     String password = "";
 
+    // set log level
+    Configurator.currentConfig().level(Level.DEBUG).activate();
+
     DatabaseImpl database = new ImpalaDatabase(host, db, user, password);
     Data data = new Data();
-    Parser p = new Parser();
+    InnocentEngine engine = new InnocentEngine(database);
     File current;
     try {
 
@@ -68,197 +73,48 @@ public class Main {
       if (args.isTest()) {
 
         int sampleCount = 0;
-        SqlDialect dialect = new HiveSqlDialect(SqlDialect.EMPTY_CONTEXT);
 
-        //        File tpcdsQueryDir = new File(args.getQueryDir());
-        //        File[] queryFiles = tpcdsQueryDir.listFiles();
-        //        Arrays.sort(queryFiles);
-        //        for (File file : queryFiles) {
-        //          if (file.isFile()) {
-        //            if (file.getName().endsWith("sql")) {
-        //              Logger.info("Parsing: {}", file.getName());
-        //              String sql = Files.asCharSource(file, Charset.forName("UTF-8")).read();
-        //              sql = sql.replaceAll(";", "");
-        //              Logger.info(sql);
-        //              Parser parser = new Parser();
-        //              QueryVisitor v = new QueryVisitor();
-        //              Sample s =
-        //                  new Sample(
-        //                      Sample.Type.STRATIFIED,
-        //                      "store_sales",
-        //                      Arrays.asList("ss_sold_date_sk"),
-        //                      100000);
-        //              SqlNode node = parser.parse(sql, v, s);
-        //              if (parser.isSampleUsed()) {
-        //                Logger.info("Sample used for {}", file.getName());
-        //                Logger.info("Rewritten query is {}", node.toSqlString(dialect));
-        //                ++sampleCount;
-        //              }
-        //            }
-        //          }
-        //        }
+        File tpcdsQueryDir = new File(args.getQueryDir());
+        File[] queryFiles = tpcdsQueryDir.listFiles();
+        Arrays.sort(queryFiles);
 
-        //        String sql =
-        //            "with ss as\n"
-        //                + " (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as
-        // store_sales\n"
-        //                + " from store_sales,date_dim,customer_address\n"
-        //                + " where ss_sold_date_sk = d_date_sk\n"
-        //                + "  and ss_addr_sk=ca_address_sk\n"
-        //                + " group by ca_county,d_qoy, d_year),\n"
-        //                + " ws as\n"
-        //                + " (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as
-        // web_sales\n"
-        //                + " from web_sales,date_dim,customer_address\n"
-        //                + " where ws_sold_date_sk = d_date_sk\n"
-        //                + "  and ws_bill_addr_sk=ca_address_sk\n"
-        //                + " group by ca_county,d_qoy, d_year)\n"
-        //                + " select \n"
-        //                + "        ss1.ca_county\n"
-        //                + "       ,ss1.d_year\n"
-        //                + "       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase\n"
-        //                + "       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase\n"
-        //                + "       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase\n"
-        //                + "       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase\n"
-        //                + " from\n"
-        //                + "        ss ss1\n"
-        //                + "       ,ss ss2\n"
-        //                + "       ,ss ss3\n"
-        //                + "       ,ws ws1\n"
-        //                + "       ,ws ws2\n"
-        //                + "       ,ws ws3\n"
-        //                + " where\n"
-        //                + "    ss1.d_qoy = 1\n"
-        //                + "    and ss1.d_year = 2000\n"
-        //                + "    and ss1.ca_county = ss2.ca_county\n"
-        //                + "    and ss2.d_qoy = 2\n"
-        //                + "    and ss2.d_year = 2000\n"
-        //                + " and ss2.ca_county = ss3.ca_county\n"
-        //                + "    and ss3.d_qoy = 3\n"
-        //                + "    and ss3.d_year = 2000\n"
-        //                + "    and ss1.ca_county = ws1.ca_county\n"
-        //                + "    and ws1.d_qoy = 1\n"
-        //                + "    and ws1.d_year = 2000\n"
-        //                + "    and ws1.ca_county = ws2.ca_county\n"
-        //                + "    and ws2.d_qoy = 2\n"
-        //                + "    and ws2.d_year = 2000\n"
-        //                + "    and ws1.ca_county = ws3.ca_county\n"
-        //                + "    and ws3.d_qoy = 3\n"
-        //                + "    and ws3.d_year =2000\n"
-        //                + "    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales
-        // else null end \n"
-        //                + "       > case when ss1.store_sales > 0 then
-        // ss2.store_sales/ss1.store_sales else null end\n"
-        //                + "    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales
-        // else null end\n"
-        //                + "       > case when ss2.store_sales > 0 then
-        // ss3.store_sales/ss2.store_sales else null end\n"
-        //                + " order by ss1.d_year";
-
-        String sql =
-            "select  dt.d_year\n"
-                + " \t,item.i_category_id\n"
-                + " \t,item.i_category\n"
-                + " \t,sum(ss_ext_sales_price)\n"
-                + " \t,avg(ss_ext_sales_price)\n"
-                //                + " \t,sum(sum(ss_ext_sales_price)) over (partition by d_year)\n"
-                + " from \tdate_dim dt\n"
-                + " \t,store_sales\n"
-                + " \t,item\n"
-                + " where dt.d_date_sk = store_sales.ss_sold_date_sk\n"
-                + " \tand store_sales.ss_item_sk = item.i_item_sk\n"
-                + " \tand item.i_manager_id = 1\n"
-                + " \tand dt.d_moy=12\n"
-                + " \tand dt.d_year=1998\n"
-                + " group by \tdt.d_year\n"
-                + " \t\t,item.i_category_id\n"
-                + " \t\t,item.i_category\n"
-                + " order by       sum(ss_ext_sales_price) desc,dt.d_year\n"
-                + " \t\t,item.i_category_id\n"
-                + " \t\t,item.i_category";
-
-        String q33 =
-            "with ss as (\n"
-                + " select\n"
-                + "          i_manufact_id,sum(ss_ext_sales_price) total_sales\n"
-                + " from\n"
-                + " \tstore_sales,\n"
-                + " \tdate_dim,\n"
-                + "         customer_address,\n"
-                + "         item\n"
-                + " where\n"
-                + "         i_manufact_id in (select\n"
-                + "  i_manufact_id\n"
-                + "from\n"
-                + " item\n"
-                + "where i_category in ('Books'))\n"
-                + " and     ss_item_sk              = i_item_sk\n"
-                + " and     ss_sold_date_sk         = d_date_sk\n"
-                + " and     d_year                  = 1999\n"
-                + " and     d_moy                   = 3\n"
-                + " and     ss_addr_sk              = ca_address_sk\n"
-                + " and     ca_gmt_offset           = -6\n"
-                + " group by i_manufact_id),\n"
-                + " cs as (\n"
-                + " select\n"
-                + "          i_manufact_id,sum(cs_ext_sales_price) total_sales\n"
-                + " from\n"
-                + " \tcatalog_sales,\n"
-                + " \tdate_dim,\n"
-                + "         customer_address,\n"
-                + "         item\n"
-                + " where\n"
-                + "         i_manufact_id               in (select\n"
-                + "  i_manufact_id\n"
-                + "from\n"
-                + " item\n"
-                + "where i_category in ('Books'))\n"
-                + " and     cs_item_sk              = i_item_sk\n"
-                + " and     cs_sold_date_sk         = d_date_sk\n"
-                + " and     d_year                  = 1999\n"
-                + " and     d_moy                   = 3\n"
-                + " and     cs_bill_addr_sk         = ca_address_sk\n"
-                + " and     ca_gmt_offset           = -6\n"
-                + " group by i_manufact_id),\n"
-                + " ws as (\n"
-                + " select\n"
-                + "          i_manufact_id,sum(ws_ext_sales_price) total_sales\n"
-                + " from\n"
-                + " \tweb_sales,\n"
-                + " \tdate_dim,\n"
-                + "         customer_address,\n"
-                + "         item\n"
-                + " where\n"
-                + "         i_manufact_id               in (select\n"
-                + "  i_manufact_id\n"
-                + "from\n"
-                + " item\n"
-                + "where i_category in ('Books'))\n"
-                + " and     ws_item_sk              = i_item_sk\n"
-                + " and     ws_sold_date_sk         = d_date_sk\n"
-                + " and     d_year                  = 1999\n"
-                + " and     d_moy                   = 3\n"
-                + " and     ws_bill_addr_sk         = ca_address_sk\n"
-                + " and     ca_gmt_offset           = -6\n"
-                + " group by i_manufact_id)\n"
-                + "  select  i_manufact_id ,sum(total_sales) total_sales\n"
-                + " from  (select * from ss\n"
-                + "        union all\n"
-                + "        select * from cs\n"
-                + "        union all\n"
-                + "        select * from ws) tmp1\n"
-                + " group by i_manufact_id\n"
-                + " order by total_sales";
-
-        Parser parser = new Parser();
-        QueryVisitor v = new QueryVisitor();
         Sample s =
             new Sample(
                 Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 100000);
-        SqlNode node = parser.parse(q33, v, s);
-        if (parser.isSampleUsed()) {
-          Logger.info("Rewritten query is {}", node.toSqlString(dialect));
-          ++sampleCount;
+
+        for (File file : queryFiles) {
+          if (file.isFile()) {
+            String queryFilename = file.getName();
+            if (queryFilename.endsWith("sql")) {
+              Logger.info("Parsing: {}", queryFilename);
+              String id = Files.getNameWithoutExtension(queryFilename);
+              String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
+              sql = sql.replaceAll(";", "");
+
+              String logFile = String.format("./log/%s.log", id);
+              File logFileDir = new File(logFile);
+              logFileDir.mkdirs();
+
+              Configurator.currentConfig()
+                  .writer(new ConsoleWriter(), Level.INFO)
+                  .addWriter(new FileWriter(logFile), Level.DEBUG)
+                  .activate();
+
+              Query q = new Query(id, sql);
+              AQPInfo aqpInfo = engine.rewriteWithSample(q, s);
+              if (aqpInfo != null) {
+                Logger.info("Rewritten query is {}", aqpInfo.getQuery().getAqpQuery());
+                ++sampleCount;
+
+                AggNonAggDetector detector = new AggNonAggDetector(aqpInfo);
+                aqpInfo.getAqpNode().accept(detector);
+                List<ColumnType> columnTypeList = detector.getColumnTypeList();
+                aqpInfo.setColumnTypeList(columnTypeList);
+
+                engine.runAQPQueryAndCompare(q, aqpInfo);
+              }
+            }
+          }
         }
 
         Logger.info("Sample used = {}", sampleCount);
@@ -291,7 +147,7 @@ public class Main {
             // order by c3 desc";
 
             QueryVisitor visitor = new QueryVisitor();
-            p.parse(sql, visitor);
+            engine.parse(sql, visitor);
             for (SqlIdentifier id : visitor.getQueryColumnSet()) {
               data.incrementFreq(id.names.get(id.names.size() - 1));
             }

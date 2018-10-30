@@ -1,4 +1,4 @@
-package dyoon.innocent.visitor;
+package dyoon.innocent.query;
 
 import dyoon.innocent.Sample;
 import org.apache.calcite.sql.SqlAsOperator;

@@ -1,4 +1,4 @@
-package dyoon.innocent.visitor;
+package dyoon.innocent.query;
 
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;

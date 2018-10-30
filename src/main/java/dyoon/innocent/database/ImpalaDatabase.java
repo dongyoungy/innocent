@@ -1,6 +1,8 @@
 package dyoon.innocent.database;
 
 import com.google.common.base.Joiner;
+import dyoon.innocent.AQPInfo;
+import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
 import org.pmw.tinylog.Logger;
 
@@ -31,9 +33,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       String connString = String.format("jdbc:impala://%s/%s", host, database);
       this.conn = DriverManager.getConnection(connString, user, password);
       this.cache = new HashMap<>();
-    } catch (ClassNotFoundException e) {
-      e.printStackTrace();
-    } catch (SQLException e) {
+    } catch (ClassNotFoundException | SQLException e) {
       e.printStackTrace();
     }
   }
@@ -41,7 +41,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   @Override
   public List<String> getTables() throws SQLException {
     final List<String> tables = new ArrayList<>();
-    final ResultSet rs = this.conn.createStatement().executeQuery(String.format("SHOW TABLES"));
+    final ResultSet rs = this.executeQuery(String.format("SHOW TABLES"));
     while (rs.next()) {
       tables.add(rs.getString(1));
     }
@@ -51,8 +51,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   @Override
   public List<String> getColumns(String table) throws SQLException {
     final List<String> columns = new ArrayList<>();
-    final ResultSet rs =
-        this.conn.createStatement().executeQuery(String.format("DESCRIBE %s", table));
+    final ResultSet rs = this.executeQuery(String.format("DESCRIBE %s", table));
     while (rs.next()) {
       columns.add(rs.getString(1));
     }
@@ -61,8 +60,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
 
   @Override
   public String getColumnType(String table, String column) throws SQLException {
-    final ResultSet rs =
-        this.conn.createStatement().executeQuery(String.format("DESCRIBE %s", table));
+    final ResultSet rs = this.executeQuery(String.format("DESCRIBE %s", table));
     while (rs.next()) {
       if (rs.getString(1).equalsIgnoreCase(column)) {
         return rs.getString(2);
@@ -101,7 +99,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
             "CREATE TABLE IF NOT EXISTS %s.%s LIKE %s.%s STORED as parquet",
             database, sampleTable, database, sourceTable);
 
-    this.conn.createStatement().execute(createSql);
+    this.execute(createSql);
 
     final String insertSql =
         String.format(
@@ -124,7 +122,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
             s.getMinRows());
     System.err.println(String.format("Executing: %s", insertSql));
 
-    this.conn.createStatement().execute(insertSql);
+    this.execute(insertSql);
 
     List<String> selectColumns = new ArrayList<>();
     List<String> statTableColumns = new ArrayList<>();
@@ -142,7 +140,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
                 + "(%s, groupsize bigint, actualsize bigint) STORED AS parquet",
             database, sampleStatTable, Joiner.on(",").join(statTableColumns));
     System.err.println(String.format("Executing: %s", createStatSql));
-    this.conn.createStatement().execute(createStatSql);
+    this.execute(createStatSql);
 
     String selectClause = Joiner.on(",").join(selectColumns);
     String groupByClause = Joiner.on(",").join(sampleColumns);
@@ -165,14 +163,10 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
             groupByClause,
             joinClause);
     System.err.println(String.format("Executing: %s", insertStatSql));
-    this.conn.createStatement().execute(insertStatSql);
+    this.execute(insertStatSql);
 
-    this.conn
-        .createStatement()
-        .execute(String.format("COMPUTE STATS %s.%s", database, sampleTable));
-    this.conn
-        .createStatement()
-        .execute(String.format("COMPUTE STATS %s.%s", database, sampleStatTable));
+    this.execute(String.format("COMPUTE STATS %s.%s", database, sampleTable));
+    this.execute(String.format("COMPUTE STATS %s.%s", database, sampleStatTable));
   }
 
   @Override
@@ -191,12 +185,37 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
             "SELECT MAX(groupsize) FROM "
                 + "(SELECT count(*) as groupsize FROM %s WHERE %s GROUP BY %s) tmp",
             table, Joiner.on(" AND ").join(notNullCond), Joiner.on(",").join(groupBys));
-    ResultSet rs = conn.createStatement().executeQuery(sql);
+    ResultSet rs = this.executeQuery(sql);
     if (rs.next()) {
       long val = rs.getLong(1);
       cache.put(key, val);
       return val;
     }
     return -1;
+  }
+
+  @Override
+  public void runQueryAndSaveResult(Query q) throws SQLException {
+    String resultTable = q.getResultTableName();
+    if (this.checkTableExists(resultTable)) {
+      return;
+    }
+
+    String sql =
+        String.format("CREATE TABLE %s STORED AS parquet AS %s", resultTable, q.getQuery());
+    this.execute(sql);
+  }
+
+  @Override
+  public void runQueryWithSampleAndSaveResult(AQPInfo info) throws SQLException {
+    String resultTable = info.getAQPResultTableName();
+    if (this.checkTableExists(resultTable)) {
+      return;
+    }
+
+    String sql =
+        String.format(
+            "CREATE TABLE %s STORED AS parquet AS %s", resultTable, info.getQuery().getAqpQuery());
+    this.execute(sql);
   }
 }

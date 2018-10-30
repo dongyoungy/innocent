@@ -158,6 +158,7 @@
             <artifactId>combinatoricslib3</artifactId>
             <version>3.3.0</version>
         </dependency>
+        <!-- https://mvnrepository.com/artifact/org.tinylog/tinylog -->
         <dependency>
             <groupId>org.tinylog</groupId>
             <artifactId>tinylog</artifactId>

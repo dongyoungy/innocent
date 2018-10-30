@@ -1,5 +1,7 @@
 package dyoon.innocent.database;
 
+import org.pmw.tinylog.Logger;
+
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -22,5 +24,17 @@ public abstract class Database implements DatabaseImpl {
     final DatabaseMetaData dbm = this.conn.getMetaData();
     final ResultSet tables = dbm.getTables(null, database, table, null);
     return tables.next();
+  }
+
+  @Override
+  public ResultSet executeQuery(String sql) throws SQLException {
+    Logger.debug("Executing: {}", sql);
+    return conn.createStatement().executeQuery(sql);
+  }
+
+  @Override
+  public boolean execute(String sql) throws SQLException {
+    Logger.debug("Executing: {}", sql);
+    return conn.createStatement().execute(sql);
   }
 }

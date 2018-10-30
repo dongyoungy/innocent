@@ -1,4 +1,4 @@
-package dyoon.innocent.visitor;
+package dyoon.innocent.query;
 
 import dyoon.innocent.Sample;
 import org.apache.calcite.sql.JoinConditionType;
@@ -24,6 +24,8 @@ import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.util.SqlShuttle;
 import org.apache.calcite.sql.util.SqlString;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,8 +42,8 @@ public class QueryTransformer extends SqlShuttle {
   private SqlIdentifier currentAggAlias;
   private SqlOperator currentAggOp;
 
-  private List<SqlIdentifier> aggAliasList;
-  private List<SqlIdentifier> aggErrorAliasList;
+  private List<Pair<SqlIdentifier, SqlIdentifier>> aggAliasPairList;
+  private List<SqlNode> extraColumns;
 
   public QueryTransformer(Sample s) {
     this.sumCount = 0;
@@ -49,8 +51,13 @@ public class QueryTransformer extends SqlShuttle {
     this.tmpCount = 0;
     this.s = s;
 
-    this.aggAliasList = new ArrayList<>();
-    this.aggErrorAliasList = new ArrayList<>();
+    this.aggAliasPairList = new ArrayList<>();
+    this.extraColumns = new ArrayList<>();
+  }
+
+  public int approxCount() {
+    // number of approximated columns
+    return this.sumCount + this.avgCount;
   }
 
   @Override
@@ -176,8 +183,7 @@ public class QueryTransformer extends SqlShuttle {
               e.printStackTrace();
             }
 
-            aggAliasList.add(this.currentAggAlias);
-            aggErrorAliasList.add(errorAlias);
+            aggAliasPairList.add(ImmutablePair.of(this.currentAggAlias, errorAlias));
           }
         }
       } // end for
@@ -188,6 +194,7 @@ public class QueryTransformer extends SqlShuttle {
       for (SqlBasicCall col : outerSelectExtraColumnList) {
         outerSelectList.add(col);
       }
+      extraColumns.addAll(outerSelectExtraColumnList);
 
       // handle FROM
       // construct join clause
@@ -282,12 +289,8 @@ public class QueryTransformer extends SqlShuttle {
     }
   }
 
-  public List<SqlIdentifier> getAggAliasList() {
-    return aggAliasList;
-  }
-
-  public List<SqlIdentifier> getAggErrorAliasList() {
-    return aggErrorAliasList;
+  public List<Pair<SqlIdentifier, SqlIdentifier>> getAggAliasPairList() {
+    return aggAliasPairList;
   }
 
   private void replaceSelectListForSampleAlias(
