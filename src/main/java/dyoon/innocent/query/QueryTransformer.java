@@ -510,12 +510,14 @@ public class QueryTransformer extends SqlShuttle {
             SqlParserPos.ZERO);
     sampleMean =
         new SqlBasicCall(SqlStdOperatorTable.AVG, new SqlNode[] {sampleMean}, SqlParserPos.ZERO);
+    SqlNodeList newGroupBy = this.cloneSqlNodeList(groupBy);
+    if (newGroupBy == null) newGroupBy = new SqlNodeList(SqlParserPos.ZERO);
     SqlNode sampleMeanWindow =
         new SqlWindow(
             SqlParserPos.ZERO,
             null,
             null,
-            this.cloneSqlNodeList(groupBy),
+            newGroupBy,
             new SqlNodeList(SqlParserPos.ZERO),
             SqlLiteral.createBoolean(false, SqlParserPos.ZERO),
             null,
