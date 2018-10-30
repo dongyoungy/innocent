@@ -245,6 +245,10 @@ public class QueryTransformer extends SqlShuttle {
         SqlIdentifier newGroupBy =
             new SqlIdentifier(Arrays.asList(s.getTable(), groupBy), SqlParserPos.ZERO);
         innerSelect.getSelectList().add(newGroupBy);
+        SqlNodeList group = innerSelect.getGroup();
+        if (group == null) {
+          innerSelect.setGroupBy(new SqlNodeList(SqlParserPos.ZERO));
+        }
         innerSelect.getGroup().add(newGroupBy);
       }
 
