@@ -574,6 +574,7 @@ public class QueryTransformer extends SqlShuttle {
   }
 
   private SqlNodeList cloneSqlNodeList(SqlNodeList list) {
+    if (list == null) return null;
     SqlNodeList newList = new SqlNodeList(SqlParserPos.ZERO);
     for (SqlNode node : list) {
       newList.add((node != null) ? node.clone(SqlParserPos.ZERO) : null);
