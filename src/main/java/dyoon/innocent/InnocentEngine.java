@@ -106,7 +106,11 @@ public class InnocentEngine {
     database.runQueryAndSaveResult(q);
 
     // run AQP query
-    database.runQueryWithSampleAndSaveResult(aqpInfo);
+    try {
+      database.runQueryWithSampleAndSaveResult(aqpInfo);
+    } catch (Exception e) {
+      return;
+    }
 
     String originalResultTableName = q.getResultTableName();
     String aqpResultTableName = aqpInfo.getAQPResultTableName();
