@@ -1,4 +1,4 @@
-package dyoon.innocent;
+package dyoon.innocent.visitor;
 
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
@@ -14,6 +14,7 @@ import java.util.Map;
 /** Created by Dong Young Yoon on 10/25/18. */
 public class AliasReplacer extends SqlShuttle {
 
+  SqlIdentifier singleAliasToReplace;
   Map<SqlIdentifier, SqlIdentifier> aliasToReplace;
   boolean isForOuterQuery;
 
@@ -22,8 +23,9 @@ public class AliasReplacer extends SqlShuttle {
     this.aliasToReplace = new HashMap<>(aliasToReplace);
   }
 
-  public AliasReplacer(boolean isForOuterQuery) {
+  public AliasReplacer(boolean isForOuterQuery, SqlIdentifier alias) {
     this.isForOuterQuery = isForOuterQuery;
+    this.singleAliasToReplace = alias;
     this.aliasToReplace = new HashMap<>();
   }
 
@@ -32,7 +34,7 @@ public class AliasReplacer extends SqlShuttle {
     if (this.isForOuterQuery) {
       if (id.names.size() > 1) {
         List<String> newIds = new ArrayList<>(id.names);
-        newIds.set(newIds.size() - 2, "tmp");
+        newIds.set(newIds.size() - 2, singleAliasToReplace.toString());
         id.setNames(newIds, new ArrayList<SqlParserPos>());
       }
     }

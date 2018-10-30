@@ -1,35 +1,17 @@
 package dyoon.innocent;
 
-import org.apache.calcite.sql.JoinConditionType;
-import org.apache.calcite.sql.JoinType;
-import org.apache.calcite.sql.SqlAsOperator;
-import org.apache.calcite.sql.SqlBasicCall;
-import org.apache.calcite.sql.SqlDialect;
+import dyoon.innocent.visitor.AliasReplacer;
+import dyoon.innocent.visitor.QueryTransformer;
+import dyoon.innocent.visitor.QueryVisitor;
 import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlJoin;
-import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
-import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlWith;
-import org.apache.calcite.sql.dialect.HiveSqlDialect;
-import org.apache.calcite.sql.fun.SqlAvgAggFunction;
-import org.apache.calcite.sql.fun.SqlStdOperatorTable;
-import org.apache.calcite.sql.fun.SqlSumAggFunction;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
-import org.apache.calcite.sql.util.SqlString;
-import org.apache.calcite.tools.FrameworkConfig;
-import org.apache.calcite.tools.Frameworks;
-import org.apache.calcite.tools.RelBuilder;
-import org.apache.calcite.util.Litmus;
-import org.pmw.tinylog.Logger;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /** Created by Dong Young Yoon on 10/19/18. */
 public class Parser {
@@ -56,252 +38,426 @@ public class Parser {
 
     Class.forName("org.apache.calcite.jdbc.Driver");
     SqlParser sqlParser = SqlParser.create(sql);
-    SqlNode newQueryNode = sqlParser.parseQuery(); // will be used to return new query.
     sqlParser = SqlParser.create(sql);
     SqlNode node = sqlParser.parseQuery();
-    SqlNodeList gby = this.getGroupBy(node);
-    SqlNodeList origGroupBy = (gby != null) ? this.cloneSqlNodeList(gby) : null;
-    SqlDialect dialect = new HiveSqlDialect(SqlDialect.EMPTY_CONTEXT);
-    SqlSelect originalSelect = null;
 
     if (s != null) {
-      visitor.setUseSample(true);
-      visitor.addTableToSample(s.getTable(), s);
-      visitor.addSampleGroupBy(s.getColumnSet());
+      QueryTransformer transformer = new QueryTransformer(s);
+      SqlNode newNode = node.accept(transformer);
+      System.out.println("");
+      return newNode;
     }
 
-    originalSelect = this.getOuterMostSelect(node);
+    return node;
 
-    if (originalSelect == null) {
-      Logger.error("original select is null");
-      return null;
-    }
-
-    SqlString sqlString = node.toSqlString(dialect);
-
-    node.accept(visitor);
-
-    SqlSelect modifiedSelect = this.getOuterMostSelect(node);
-
-    // test query transformation for AQP
-    if (s != null && visitor.getNumTableSubstitutions() > 0 && origGroupBy != null) {
-      Frameworks.ConfigBuilder configBuilder = Frameworks.newConfigBuilder();
-      final FrameworkConfig config = configBuilder.build();
-      final RelBuilder builder = RelBuilder.create(config);
-      this.isSampleUsed = true;
-
-      // add join with stat table
-      SqlNode from = originalSelect.getFrom();
-      String statTable = s.getSampleTableName() + "__stat";
-      SqlIdentifier sampleAlias = visitor.getSampleAlias(s);
-      if (sampleAlias == null) {
-        sampleAlias = new SqlIdentifier(s.getTable(), SqlParserPos.ZERO);
-      }
-      SqlIdentifier statAlias = new SqlIdentifier("stat", SqlParserPos.ZERO);
-
-      // change agg function in the select to include scaling
-      SqlNodeList selectList = this.cloneSqlNodeList(modifiedSelect.getSelectList());
-      SqlNodeList newSelectList = this.cloneSqlNodeList(originalSelect.getSelectList());
-
-      int sumCount = 0, aggCount = 0;
-      for (int i = 0; i < selectList.size(); ++i) {
-        SqlNode item = selectList.get(i);
-        // look for agg functions
-        if (item instanceof SqlBasicCall) {
-          SqlBasicCall bc = (SqlBasicCall) item;
-          SqlOperator op = bc.getOperator();
-          SqlIdentifier aggAlias = null;
-
-          // check if there is alias
-          if (op instanceof SqlAsOperator) {
-            if (bc.operands[0] instanceof SqlBasicCall) {
-              aggAlias = (SqlIdentifier) bc.operands[1];
-              bc = (SqlBasicCall) bc.operands[0];
-              op = bc.getOperator();
-            } else {
-              continue;
-            }
-          }
-
-          if (op instanceof SqlSumAggFunction) {
-            SqlNode c = SqlLiteral.createExactNumeric("100000", SqlParserPos.ZERO);
-            SqlIdentifier sumAlias =
-                new SqlIdentifier(String.format("sum%d", sumCount++), SqlParserPos.ZERO);
-            SqlBasicCall newOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.MULTIPLY,
-                    new SqlNode[] {bc.operands[0], c},
-                    SqlParserPos.ZERO);
-            newOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.DIVIDE,
-                    new SqlNode[] {newOp, statAlias.plus("groupsize", SqlParserPos.ZERO)},
-                    SqlParserPos.ZERO);
-            newOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.MULTIPLY,
-                    new SqlNode[] {newOp, statAlias.plus("actualsize", SqlParserPos.ZERO)},
-                    SqlParserPos.ZERO);
-            newOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.DIVIDE, new SqlNode[] {newOp, c}, SqlParserPos.ZERO);
-            newOp =
-                new SqlBasicCall(SqlStdOperatorTable.SUM, new SqlNode[] {newOp}, SqlParserPos.ZERO);
-            newOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.AS, new SqlNode[] {newOp, sumAlias}, SqlParserPos.ZERO);
-
-            SqlBasicCall newAggOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.SUM, new SqlNode[] {sumAlias}, SqlParserPos.ZERO);
-            if (aggAlias != null) {
-              newAggOp =
-                  new SqlBasicCall(
-                      SqlStdOperatorTable.AS,
-                      new SqlNode[] {newAggOp, aggAlias},
-                      SqlParserPos.ZERO);
-            }
-            for (int j = 0; j < originalSelect.getSelectList().size(); ++j) {
-              SqlNode n = originalSelect.getSelectList().get(j);
-              if (n.equalsDeep(item, Litmus.IGNORE)) {
-                newSelectList.set(j, newAggOp);
-              }
-            }
-
-            modifiedSelect.getSelectList().set(i, newOp);
-          } else if (op instanceof SqlAvgAggFunction) {
-            SqlIdentifier avgAlias =
-                new SqlIdentifier(String.format("avg%d", sumCount++), SqlParserPos.ZERO);
-            SqlBasicCall newOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.AS, new SqlNode[] {bc, avgAlias}, SqlParserPos.ZERO);
-            SqlBasicCall newAggOp =
-                new SqlBasicCall(
-                    SqlStdOperatorTable.AVG, new SqlNode[] {avgAlias}, SqlParserPos.ZERO);
-            if (aggAlias != null) {
-              newAggOp =
-                  new SqlBasicCall(
-                      SqlStdOperatorTable.AS,
-                      new SqlNode[] {newAggOp, aggAlias},
-                      SqlParserPos.ZERO);
-            }
-            for (int j = 0; j < originalSelect.getSelectList().size(); ++j) {
-              SqlNode n = originalSelect.getSelectList().get(j);
-              if (n.equalsDeep(item, Litmus.IGNORE)) {
-                newSelectList.set(j, newAggOp);
-              }
-            }
-            modifiedSelect.getSelectList().set(i, newOp);
-          }
-        }
-      }
-
-      // construct join clause
-      List<SqlBasicCall> joinOps = new ArrayList<>();
-      for (String col : s.getColumnSet()) {
-        SqlIdentifier col1 = sampleAlias.plus(col, SqlParserPos.ZERO);
-        SqlIdentifier col2 = statAlias.plus(col, SqlParserPos.ZERO);
-        SqlBasicCall op =
-            new SqlBasicCall(
-                SqlStdOperatorTable.EQUALS, new SqlNode[] {col1, col2}, SqlParserPos.ZERO);
-        joinOps.add(op);
-      }
-      SqlBasicCall joinClause = null;
-      if (joinOps.size() == 1) {
-        joinClause = joinOps.get(0);
-      } else if (joinOps.size() > 1) {
-        joinClause =
-            new SqlBasicCall(
-                SqlStdOperatorTable.AND,
-                new SqlNode[] {joinOps.get(0), joinOps.get(1)},
-                SqlParserPos.ZERO);
-        for (int i = 2; i < joinOps.size(); ++i) {
-          joinClause =
-              new SqlBasicCall(
-                  SqlStdOperatorTable.AND,
-                  new SqlNode[] {joinClause, joinOps.get(i)},
-                  SqlParserPos.ZERO);
-        }
-      }
-
-      SqlJoin newJoin =
-          new SqlJoin(
-              SqlParserPos.ZERO,
-              from,
-              SqlLiteral.createBoolean(false, SqlParserPos.ZERO),
-              JoinType.INNER.symbol(SqlParserPos.ZERO),
-              new SqlBasicCall(
-                  new SqlAsOperator(),
-                  new SqlNode[] {new SqlIdentifier(statTable, SqlParserPos.ZERO), statAlias},
-                  SqlParserPos.ZERO),
-              JoinConditionType.ON.symbol(SqlParserPos.ZERO),
-              joinClause);
-
-      modifiedSelect.setFrom(newJoin);
-      replaceSelectListForSampleAlias(modifiedSelect, visitor);
-
-      // make it a subquery
-      SqlBasicCall innerQuery =
-          new SqlBasicCall(
-              new SqlAsOperator(),
-              new SqlNode[] {modifiedSelect, new SqlIdentifier("tmp", SqlParserPos.ZERO)},
-              SqlParserPos.ZERO);
-      //      SqlNodeList origGroupBy = originalSelect.getGroup();
-      //      SqlNodeList newGroup = modifiedSelect.getGroup().clone(SqlParserPos.ZERO);
-      //
-      //      List<SqlNode> groupList = newGroup.getList();
-      //      List<SqlNode> newGroupBy =
-      //          groupList
-      //              .stream()
-      //              .filter(sqlNode -> IsInGroupBy(sqlNode, origGroupBy))
-      //              .collect(Collectors.toList());
-
-      this.replaceListForOuterQuery(newSelectList);
-      SqlNodeList newGroupBy = this.cloneSqlNodeList(origGroupBy);
-      this.replaceListForOuterQuery(newGroupBy);
-
-      SqlSelect newSelectNode =
-          new SqlSelect(
-              SqlParserPos.ZERO,
-              null,
-              newSelectList,
-              innerQuery,
-              null,
-              newGroupBy,
-              null,
-              null,
-              null,
-              null,
-              null);
-
-      SqlString newSql = newSelectNode.toSqlString(dialect);
-
-      System.out.println(newSql.toString().toLowerCase());
-
-      if (newQueryNode instanceof SqlWith) {
-        SqlWith with = (SqlWith) newQueryNode;
-        newQueryNode =
-            new SqlWith(
-                SqlParserPos.ZERO,
-                new SqlNodeList(with.getOperandList(), SqlParserPos.ZERO),
-                newSelectNode);
-      } else if (newQueryNode instanceof SqlOrderBy) {
-        SqlOrderBy orderBy = (SqlOrderBy) newQueryNode;
-
-        // remove LIMIT
-        //        newQueryNode =
-        //            new SqlOrderBy(
-        //                SqlParserPos.ZERO, newSelectNode, orderBy.orderList, orderBy.offset,
-        // null);
-
-        // remove order by for now.
-        newQueryNode = newSelectNode;
-      } else if (newQueryNode instanceof SqlSelect) {
-        newQueryNode = newSelectNode;
-      }
-    }
-
-    return newQueryNode;
+    //    if (s != null) {
+    //      visitor.setUseSample(true);
+    //      visitor.addTableToSample(s.getTable(), s);
+    //      visitor.addSampleGroupBy(s.getColumnSet());
+    //    }
+    //
+    //    originalSelect = this.getOuterMostSelect(node);
+    //
+    //    if (originalSelect == null) {
+    //      Logger.error("original select is null");
+    //      return null;
+    //    }
+    //
+    //    SqlString sqlString = node.toSqlString(dialect);
+    //
+    //    node.accept(visitor);
+    //
+    //    SqlSelect modifiedSelect = this.getOuterMostSelect(node);
+    //
+    //    // test query transformation for AQP
+    //    if (s != null && visitor.getNumTableSubstitutions() > 0 && origGroupBy != null) {
+    //      Frameworks.ConfigBuilder configBuilder = Frameworks.newConfigBuilder();
+    //      final FrameworkConfig config = configBuilder.build();
+    //      final RelBuilder builder = RelBuilder.create(config);
+    //      this.isSampleUsed = true;
+    //
+    //      // add join with stat table
+    //      SqlNode from = originalSelect.getFrom();
+    //      String statTable = s.getSampleTableName() + "__stat";
+    //      SqlIdentifier sampleAlias = visitor.getSampleAlias(s);
+    //      if (sampleAlias == null) {
+    //        sampleAlias = new SqlIdentifier(s.getTable(), SqlParserPos.ZERO);
+    //      }
+    //      SqlIdentifier statAlias = new SqlIdentifier("stat", SqlParserPos.ZERO);
+    //
+    //      // change agg function in the select to include scaling
+    //      SqlNodeList selectList = this.cloneSqlNodeList(modifiedSelect.getSelectList());
+    //      SqlNodeList newSelectList = this.cloneSqlNodeList(originalSelect.getSelectList());
+    //
+    //      int sumCount = 0, aggCount = 0;
+    //      for (int i = 0; i < selectList.size(); ++i) {
+    //        SqlNode item = selectList.get(i);
+    //        // look for agg functions
+    //        if (item instanceof SqlBasicCall) {
+    //          SqlBasicCall bc = (SqlBasicCall) item;
+    //          SqlOperator op = bc.getOperator();
+    //          SqlIdentifier aggAlias = null;
+    //
+    //          // check if there is alias
+    //          if (op instanceof SqlAsOperator) {
+    //            if (bc.operands[0] instanceof SqlBasicCall) {
+    //              aggAlias = (SqlIdentifier) bc.operands[1];
+    //              bc = (SqlBasicCall) bc.operands[0];
+    //              op = bc.getOperator();
+    //            } else {
+    //              continue;
+    //            }
+    //          }
+    //
+    //          // x in agg(x)
+    //          SqlNode aggSource = bc.operands[0];
+    //
+    //          if (op instanceof SqlSumAggFunction) {
+    //            SqlNode c = SqlLiteral.createExactNumeric("100000", SqlParserPos.ZERO);
+    //            SqlIdentifier sumAlias =
+    //                new SqlIdentifier(String.format("sum%d", sumCount++), SqlParserPos.ZERO);
+    //
+    //            // scale the summation
+    //            // x / groupsize * actualsize
+    //            SqlBasicCall scaled =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.MULTIPLY,
+    //                    new SqlNode[] {bc.operands[0], c},
+    //                    SqlParserPos.ZERO);
+    //            scaled =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.DIVIDE,
+    //                    new SqlNode[] {scaled, statAlias.plus("groupsize", SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            scaled =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.MULTIPLY,
+    //                    new SqlNode[] {scaled, statAlias.plus("actualsize", SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            scaled =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.DIVIDE, new SqlNode[] {scaled, c}, SqlParserPos.ZERO);
+    //            // sum (x / groupsize * actualsize)
+    //            SqlBasicCall newOp =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.SUM, new SqlNode[] {scaled}, SqlParserPos.ZERO);
+    //            // sum (x / groupsize * actualsize) as sumAlias
+    //            newOp =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS, new SqlNode[] {newOp, sumAlias},
+    // SqlParserPos.ZERO);
+    //
+    //            SqlBasicCall newAggOp =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.SUM, new SqlNode[] {sumAlias}, SqlParserPos.ZERO);
+    //            if (aggAlias != null) {
+    //              newAggOp =
+    //                  new SqlBasicCall(
+    //                      SqlStdOperatorTable.AS,
+    //                      new SqlNode[] {newAggOp, aggAlias},
+    //                      SqlParserPos.ZERO);
+    //            }
+    //            for (int j = 0; j < originalSelect.getSelectList().size(); ++j) {
+    //              SqlNode n = originalSelect.getSelectList().get(j);
+    //              if (n.equalsDeep(item, Litmus.IGNORE)) {
+    //                newSelectList.set(j, newAggOp);
+    //              }
+    //            }
+    //
+    //            // add window function for sample mean
+    //            SqlNode sampleMean =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AVG,
+    //                    new SqlNode[] {scaled.clone(SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            sampleMean =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AVG, new SqlNode[] {sampleMean}, SqlParserPos.ZERO);
+    //            SqlNode sampleMeanWindow =
+    //                new SqlWindow(
+    //                    SqlParserPos.ZERO,
+    //                    null,
+    //                    null,
+    //                    this.cloneSqlNodeList(origGroupBy),
+    //                    new SqlNodeList(SqlParserPos.ZERO),
+    //                    SqlLiteral.createBoolean(false, SqlParserPos.ZERO),
+    //                    null,
+    //                    null,
+    //                    SqlLiteral.createBoolean(true, SqlParserPos.ZERO));
+    //            sampleMean =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.OVER,
+    //                    new SqlNode[] {sampleMean, sampleMeanWindow},
+    //                    SqlParserPos.ZERO);
+    //            SqlIdentifier sampleMeanAlias =
+    //                new SqlIdentifier(sumAlias.toString() + "_samplemean", SqlParserPos.ZERO);
+    //            sampleMean =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS,
+    //                    new SqlNode[] {sampleMean, sampleMeanAlias},
+    //                    SqlParserPos.ZERO);
+    //
+    //            // add group mean
+    //            SqlNode mean =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AVG,
+    //                    new SqlNode[] {scaled.clone(SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            SqlIdentifier meanAlias =
+    //                new SqlIdentifier(sumAlias.toString() + "_groupmean", SqlParserPos.ZERO);
+    //            mean =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS, new SqlNode[] {mean, meanAlias},
+    // SqlParserPos.ZERO);
+    //
+    //            // add variance
+    //            SqlNode variance =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.VAR_SAMP,
+    //                    new SqlNode[] {scaled.clone(SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            SqlIdentifier varianceAlias =
+    //                new SqlIdentifier(sumAlias.toString() + "_var", SqlParserPos.ZERO);
+    //            variance =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS,
+    //                    new SqlNode[] {variance, varianceAlias},
+    //                    SqlParserPos.ZERO);
+    //
+    //            // add count
+    //            SqlNode count =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.COUNT,
+    //                    new SqlNode[] {new SqlIdentifier("", SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            // count - 1
+    //            count =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.MINUS,
+    //                    new SqlNode[] {count, SqlLiteral.createExactNumeric("1",
+    // SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            SqlIdentifier countAlias =
+    //                new SqlIdentifier(sumAlias.toString() + "_count", SqlParserPos.ZERO);
+    //            count =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS, new SqlNode[] {count, countAlias},
+    // SqlParserPos.ZERO);
+    //
+    //            modifiedSelect.getSelectList().set(i, newOp);
+    //            modifiedSelect.getSelectList().add(variance);
+    //            modifiedSelect.getSelectList().add(count);
+    //            modifiedSelect.getSelectList().add(mean);
+    //            modifiedSelect.getSelectList().add(sampleMean);
+    //
+    //            SqlNode meanDiff =
+    //                ((SqlSelect)
+    //                        SqlParser.create(
+    //                                String.format(
+    //                                    "SELECT %s - %s FROM t",
+    //                                    meanAlias.toString(), sampleMeanAlias.toString()))
+    //                            .parseQuery())
+    //                    .getSelectList()
+    //                    .get(0);
+    //            meanDiff =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.POWER,
+    //                    new SqlNode[] {meanDiff, SqlLiteral.createExactNumeric("2",
+    // SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            SqlNode countPlusOne =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.PLUS,
+    //                    new SqlNode[] {
+    //                      countAlias, SqlLiteral.createExactNumeric("1", SqlParserPos.ZERO)
+    //                    },
+    //                    SqlParserPos.ZERO);
+    //            meanDiff =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.MULTIPLY,
+    //                    new SqlNode[] {meanDiff, countPlusOne},
+    //                    SqlParserPos.ZERO);
+    //
+    //            SqlNode errorNumerator =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.MULTIPLY,
+    //                    new SqlNode[] {varianceAlias, countAlias},
+    //                    SqlParserPos.ZERO);
+    //            errorNumerator =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.PLUS,
+    //                    new SqlNode[] {errorNumerator, meanDiff},
+    //                    SqlParserPos.ZERO);
+    //            SqlNode varianceCountSum =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.SUM, new SqlNode[] {errorNumerator},
+    // SqlParserPos.ZERO);
+    //            SqlNode countSum =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.SUM, new SqlNode[] {countAlias}, SqlParserPos.ZERO);
+    //            SqlNode div =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.DIVIDE,
+    //                    new SqlNode[] {varianceCountSum, countSum},
+    //                    SqlParserPos.ZERO);
+    //            SqlNode stddev =
+    //                new SqlBasicCall(SqlStdOperatorTable.SQRT, new SqlNode[] {div},
+    // SqlParserPos.ZERO);
+    //
+    //            SqlNode count2 =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.COUNT,
+    //                    new SqlNode[] {new SqlIdentifier("", SqlParserPos.ZERO)},
+    //                    SqlParserPos.ZERO);
+    //            SqlNode sqrtCount =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.SQRT, new SqlNode[] {count2}, SqlParserPos.ZERO);
+    //            SqlNode error =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.MULTIPLY,
+    //                    new SqlNode[] {stddev, sqrtCount},
+    //                    SqlParserPos.ZERO);
+    //            SqlIdentifier errorAlias =
+    //                new SqlIdentifier(sumAlias.toString() + "_error", SqlParserPos.ZERO);
+    //            error =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS, new SqlNode[] {error, errorAlias},
+    // SqlParserPos.ZERO);
+    //
+    //            newSelectList.add(error);
+    //          } else if (op instanceof SqlAvgAggFunction) {
+    //            SqlIdentifier avgAlias =
+    //                new SqlIdentifier(String.format("avg%d", sumCount++), SqlParserPos.ZERO);
+    //            SqlBasicCall newOp =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AS, new SqlNode[] {bc, avgAlias}, SqlParserPos.ZERO);
+    //            SqlBasicCall newAggOp =
+    //                new SqlBasicCall(
+    //                    SqlStdOperatorTable.AVG, new SqlNode[] {avgAlias}, SqlParserPos.ZERO);
+    //            if (aggAlias != null) {
+    //              newAggOp =
+    //                  new SqlBasicCall(
+    //                      SqlStdOperatorTable.AS,
+    //                      new SqlNode[] {newAggOp, aggAlias},
+    //                      SqlParserPos.ZERO);
+    //            }
+    //            for (int j = 0; j < originalSelect.getSelectList().size(); ++j) {
+    //              SqlNode n = originalSelect.getSelectList().get(j);
+    //              if (n.equalsDeep(item, Litmus.IGNORE)) {
+    //                newSelectList.set(j, newAggOp);
+    //              }
+    //            }
+    //            modifiedSelect.getSelectList().set(i, newOp);
+    //          }
+    //        }
+    //      }
+    //
+    //      // construct join clause
+    //      List<SqlBasicCall> joinOps = new ArrayList<>();
+    //      for (String col : s.getColumnSet()) {
+    //        SqlIdentifier col1 = sampleAlias.plus(col, SqlParserPos.ZERO);
+    //        SqlIdentifier col2 = statAlias.plus(col, SqlParserPos.ZERO);
+    //        SqlBasicCall op =
+    //            new SqlBasicCall(
+    //                SqlStdOperatorTable.EQUALS, new SqlNode[] {col1, col2}, SqlParserPos.ZERO);
+    //        joinOps.add(op);
+    //      }
+    //      SqlBasicCall joinClause = null;
+    //      if (joinOps.size() == 1) {
+    //        joinClause = joinOps.get(0);
+    //      } else if (joinOps.size() > 1) {
+    //        joinClause =
+    //            new SqlBasicCall(
+    //                SqlStdOperatorTable.AND,
+    //                new SqlNode[] {joinOps.get(0), joinOps.get(1)},
+    //                SqlParserPos.ZERO);
+    //        for (int i = 2; i < joinOps.size(); ++i) {
+    //          joinClause =
+    //              new SqlBasicCall(
+    //                  SqlStdOperatorTable.AND,
+    //                  new SqlNode[] {joinClause, joinOps.get(i)},
+    //                  SqlParserPos.ZERO);
+    //        }
+    //      }
+    //
+    //      SqlJoin newJoin =
+    //          new SqlJoin(
+    //              SqlParserPos.ZERO,
+    //              from,
+    //              SqlLiteral.createBoolean(false, SqlParserPos.ZERO),
+    //              JoinType.INNER.symbol(SqlParserPos.ZERO),
+    //              new SqlBasicCall(
+    //                  new SqlAsOperator(),
+    //                  new SqlNode[] {new SqlIdentifier(statTable, SqlParserPos.ZERO), statAlias},
+    //                  SqlParserPos.ZERO),
+    //              JoinConditionType.ON.symbol(SqlParserPos.ZERO),
+    //              joinClause);
+    //
+    //      modifiedSelect.setFrom(newJoin);
+    //      replaceSelectListForSampleAlias(modifiedSelect, visitor);
+    //
+    //      // make it a subquery
+    //      SqlBasicCall innerQuery =
+    //          new SqlBasicCall(
+    //              new SqlAsOperator(),
+    //              new SqlNode[] {modifiedSelect, new SqlIdentifier("tmp", SqlParserPos.ZERO)},
+    //              SqlParserPos.ZERO);
+    //      //      SqlNodeList origGroupBy = originalSelect.getGroup();
+    //      //      SqlNodeList newGroup = modifiedSelect.getGroup().clone(SqlParserPos.ZERO);
+    //      //
+    //      //      List<SqlNode> groupList = newGroup.getList();
+    //      //      List<SqlNode> newGroupBy =
+    //      //          groupList
+    //      //              .stream()
+    //      //              .filter(sqlNode -> IsInGroupBy(sqlNode, origGroupBy))
+    //      //              .collect(Collectors.toList());
+    //
+    //      this.replaceListForOuterQuery(newSelectList);
+    //      SqlNodeList newGroupBy = this.cloneSqlNodeList(origGroupBy);
+    //      this.replaceListForOuterQuery(newGroupBy);
+    //
+    //      SqlSelect newSelectNode =
+    //          new SqlSelect(
+    //              SqlParserPos.ZERO,
+    //              null,
+    //              newSelectList,
+    //              innerQuery,
+    //              null,
+    //              newGroupBy,
+    //              null,
+    //              null,
+    //              null,
+    //              null,
+    //              null);
+    //
+    //      SqlString newSql = newSelectNode.toSqlString(dialect);
+    //
+    //      System.out.println(newSql.toString().toLowerCase());
+    //
+    //      if (newQueryNode instanceof SqlWith) {
+    //        SqlWith with = (SqlWith) newQueryNode;
+    //        newQueryNode =
+    //            new SqlWith(
+    //                SqlParserPos.ZERO,
+    //                new SqlNodeList(with.getOperandList(), SqlParserPos.ZERO),
+    //                newSelectNode);
+    //      } else if (newQueryNode instanceof SqlOrderBy) {
+    //        SqlOrderBy orderBy = (SqlOrderBy) newQueryNode;
+    //
+    //        // remove LIMIT
+    //        //        newQueryNode =
+    //        //            new SqlOrderBy(
+    //        //                SqlParserPos.ZERO, newSelectNode, orderBy.orderList, orderBy.offset,
+    //        // null);
+    //
+    //        // remove order by for now.
+    //        newQueryNode = newSelectNode;
+    //      } else if (newQueryNode instanceof SqlSelect) {
+    //        newQueryNode = newSelectNode;
+    //      }
+    //    }
+    //
+    //    return newQueryNode;
   }
 
   private SqlSelect getOuterMostSelect(SqlNode node) {
@@ -332,7 +488,7 @@ public class Parser {
   }
 
   private void replaceListForOuterQuery(SqlNodeList selectList) {
-    AliasReplacer replacer = new AliasReplacer(true);
+    AliasReplacer replacer = new AliasReplacer(true, null);
     selectList.accept(replacer);
   }
 

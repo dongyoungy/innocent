@@ -1,5 +1,6 @@
-package dyoon.innocent;
+package dyoon.innocent.visitor;
 
+import dyoon.innocent.Sample;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlCall;
