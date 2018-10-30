@@ -267,7 +267,9 @@ public class QueryTransformer extends SqlShuttle {
 
       this.replaceListForOuterQuery(outerSelectList, tmpAlias);
       SqlNodeList newGroupBy = this.cloneSqlNodeList(origGroupBy);
-      this.replaceListForOuterQuery(newGroupBy, tmpAlias);
+      if (newGroupBy != null) {
+        this.replaceListForOuterQuery(newGroupBy, tmpAlias);
+      }
 
       SqlSelect newSelectNode =
           new SqlSelect(
