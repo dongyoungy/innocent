@@ -92,8 +92,6 @@ public class Main {
               sql = sql.replaceAll(";", "");
 
               String logFile = String.format("./log/%s.log", id);
-              File logFileDir = new File(logFile);
-              logFileDir.mkdirs();
 
               Configurator.currentConfig()
                   .writer(new ConsoleWriter(), Level.INFO)
