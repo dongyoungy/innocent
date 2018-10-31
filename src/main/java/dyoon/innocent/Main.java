@@ -87,9 +87,6 @@ public class Main {
             String queryFilename = file.getName();
             if (queryFilename.endsWith("sql")) {
               String id = Files.getNameWithoutExtension(queryFilename);
-              if (!id.equals("query13")) {
-                continue;
-              }
               String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
               sql = sql.replaceAll(";", "");
 
