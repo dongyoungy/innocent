@@ -80,6 +80,13 @@ public class AggNonAggDetector extends SqlShuttle {
           if (alias.toString().toLowerCase().endsWith("_error")) {
             type = ColumnType.ERROR;
           }
+          for (Pair<Integer, List<SqlNode>> pair : info.getExpressionList()) {
+            for (SqlNode expr : pair.getRight()) {
+              if (expr.equalsDeep(alias, Litmus.IGNORE)) {
+                type = ColumnType.AGG;
+              }
+            }
+          }
         }
       }
       for (Pair<Integer, List<SqlNode>> pair : info.getExpressionList()) {

@@ -204,6 +204,8 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     String sql =
         String.format("CREATE TABLE %s STORED AS parquet AS %s", resultTable, q.getQuery());
     sql = sql.replaceAll("ASYMMETRIC", "");
+    sql = sql.replaceAll("LIMIT 100", "");
+    sql = sql.replaceAll("limit 100", "");
     this.execute(sql);
   }
 
@@ -218,6 +220,8 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
         String.format(
             "CREATE TABLE %s STORED AS parquet AS %s", resultTable, info.getQuery().getAqpQuery());
     sql = sql.replaceAll("ASYMMETRIC", "");
+    sql = sql.replaceAll("LIMIT 100", "");
+    sql = sql.replaceAll("limit 100", "");
     this.execute(sql);
   }
 }

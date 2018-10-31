@@ -90,12 +90,16 @@ public class Main {
               String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
               sql = sql.replaceAll(";", "");
 
+              //              if (!id.equalsIgnoreCase("query29")) {
+              //                continue;
+              //              }
+
               Logger.info("Parsing: {}", queryFilename);
 
               String logFile = String.format("./log/%s.log", id);
 
               Configurator.currentConfig()
-                  .writer(new ConsoleWriter(), Level.INFO)
+                  .writer(new ConsoleWriter(), Level.DEBUG)
                   .addWriter(new FileWriter(logFile), Level.DEBUG)
                   .activate();
 
@@ -220,5 +224,6 @@ public class Main {
     }
 
     System.out.println("Done.");
+    System.exit(0);
   }
 }

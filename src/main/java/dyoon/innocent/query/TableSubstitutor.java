@@ -63,7 +63,7 @@ public class TableSubstitutor extends SqlShuttle {
         }
       }
     }
-    return id;
+    return null;
   }
 
   public SqlIdentifier getSampleAlias(Sample s) {
@@ -94,14 +94,14 @@ public class TableSubstitutor extends SqlShuttle {
       if (from instanceof SqlIdentifier) {
         SqlIdentifier id = (SqlIdentifier) from;
         SqlNode newId = this.addTable(id);
-        select.setFrom(newId);
+        if (newId != null) select.setFrom(newId);
       }
     } else if (call instanceof SqlJoin) {
       SqlJoin j = (SqlJoin) call;
       if (j.getLeft() instanceof SqlIdentifier) {
         SqlIdentifier id = (SqlIdentifier) j.getLeft();
         SqlNode newId = this.addTable(id);
-        j.setLeft(newId);
+        if (newId != null) j.setLeft(newId);
       } else if (j.getLeft() instanceof SqlBasicCall) {
         SqlBasicCall bc = (SqlBasicCall) j.getLeft();
         if (bc.getOperator() instanceof SqlAsOperator && bc.operands[0] instanceof SqlIdentifier) {
@@ -112,13 +112,13 @@ public class TableSubstitutor extends SqlShuttle {
       if (j.getRight() instanceof SqlIdentifier) {
         SqlIdentifier id = (SqlIdentifier) j.getRight();
         SqlNode newId = this.addTable(id);
-        j.setRight(newId);
+        if (newId != null) j.setRight(newId);
       } else if (j.getRight() instanceof SqlBasicCall) {
         SqlBasicCall bc = (SqlBasicCall) j.getRight();
         if (bc.getOperator() instanceof SqlAsOperator && bc.operands[0] instanceof SqlIdentifier) {
           this.visit(bc);
           SqlNode newId = this.addTable((SqlIdentifier) bc.operands[0]);
-          j.setRight(newId);
+          if (newId != null) j.setRight(newId);
         }
       }
     }
