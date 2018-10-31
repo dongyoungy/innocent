@@ -12,8 +12,10 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.util.SqlShuttle;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -122,5 +124,23 @@ public class TableSubstitutor extends SqlShuttle {
     }
 
     return super.visit(call);
+  }
+
+  @Override
+  public SqlNode visit(SqlIdentifier id) {
+    if (id.names.size() == 1) {
+      String name = id.names.get(0);
+      for (Sample sample : tableToSampleMap.values()) {
+        for (String sampleColumn : sample.getColumnSet()) {
+          if (sampleColumn.equalsIgnoreCase(name)) {
+            List<String> newNames = new ArrayList<>();
+            newNames.add(this.getSampleAlias(sample).toString());
+            newNames.add(name);
+            id.setNames(newNames, new ArrayList<>());
+          }
+        }
+      }
+    }
+    return super.visit(id);
   }
 }

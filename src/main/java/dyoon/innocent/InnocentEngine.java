@@ -102,13 +102,13 @@ public class InnocentEngine {
       return;
     }
 
-    // run orig query
-    database.runQueryAndSaveResult(q);
-
-    // run AQP query
     try {
+      // run orig query
+      database.runQueryAndSaveResult(q);
+      // run AQP query
       database.runQueryWithSampleAndSaveResult(aqpInfo);
     } catch (Exception e) {
+      Logger.error(e);
       return;
     }
 
@@ -190,8 +190,10 @@ public class InnocentEngine {
     }
     String joinClause = Joiner.on(" AND ").join(joinItems);
 
-    String evalSql =
-        String.format("SELECT %s FROM %s WHERE %s", selectClause, fromClause, joinClause);
+    String evalSql = String.format("SELECT %s FROM %s", selectClause, fromClause);
+    if (!joinClause.isEmpty()) {
+      evalSql += String.format(" WHERE %s", joinClause);
+    }
     String origGroupCountSql =
         String.format("SELECT count(*) as groupcount from %s", originalResultTableName);
     String aqpGroupCountSql =
