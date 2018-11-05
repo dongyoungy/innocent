@@ -29,6 +29,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** Created by Dong Young Yoon on 10/19/18. */
 public class InnocentEngine {
@@ -36,6 +37,7 @@ public class InnocentEngine {
   private String timeCreated;
   private boolean isSampleUsed = false;
   private DatabaseImpl database;
+  private Map<String, Double> origRunTimeCache;
 
   public InnocentEngine(DatabaseImpl database, String timestamp) {
     this.database = database;
@@ -120,7 +122,13 @@ public class InnocentEngine {
 
     try {
       // run orig query
-      origTime = database.runQueryAndSaveResult(q, args);
+      if (origRunTimeCache.containsKey(q.getId())
+          && database.checkTableExists(q.getResultTableName())) {
+        origTime = origRunTimeCache.get(q.getId());
+      } else {
+        origTime = database.runQueryAndSaveResult(q, args);
+        origRunTimeCache.put(q.getId(), origTime);
+      }
       // run AQP query
       sampleTime = database.runQueryWithSampleAndSaveResult(aqpInfo, args);
     } catch (Exception e) {
