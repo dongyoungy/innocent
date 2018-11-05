@@ -7,6 +7,9 @@ public class Args {
   @Parameter(names = "--create", description = "Create samples at the end")
   private boolean create = false;
 
+  @Parameter(names = "--overwrite", description = "Overwrite test results")
+  private boolean overwrite = false;
+
   @Parameter(names = "--help", help = true)
   private boolean help = false;
 
@@ -22,6 +25,12 @@ public class Args {
       names = "--max-col-per-sample",
       description = "Maximum number of columns used in each sample")
   private int maxColPerSample = 2;
+
+  @Parameter(names = "--clear-cache-script", description = "Location of cache clear script")
+  private String clearCacheScript = "";
+
+  @Parameter(names = "--measure-time", description = "measure time when test/evaluating samples")
+  private boolean measureTime = false;
 
   @Parameter(
       names = "--min-rows",
@@ -73,7 +82,19 @@ public class Args {
     return host;
   }
 
+  public boolean isOverwrite() {
+    return overwrite;
+  }
+
   public boolean isTest() {
     return test;
+  }
+
+  public String getClearCacheScript() {
+    return clearCacheScript;
+  }
+
+  public boolean isMeasureTime() {
+    return measureTime;
   }
 }

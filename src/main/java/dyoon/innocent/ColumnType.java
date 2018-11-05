@@ -4,5 +4,6 @@ package dyoon.innocent;
 public enum ColumnType {
   NON_AGG,
   AGG,
-  ERROR
+  ERROR,
+  REL_ERROR
 }

@@ -1,6 +1,7 @@
 package dyoon.innocent.database;
 
 import dyoon.innocent.AQPInfo;
+import dyoon.innocent.Args;
 import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
 
@@ -26,11 +27,13 @@ public interface DatabaseImpl {
 
   long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException;
 
-  void runQueryAndSaveResult(Query q) throws SQLException;
+  double runQueryAndSaveResult(Query q, Args args) throws SQLException;
 
-  void runQueryWithSampleAndSaveResult(AQPInfo aqp) throws SQLException;
+  double runQueryWithSampleAndSaveResult(AQPInfo aqp, Args args) throws SQLException;
 
   ResultSet executeQuery(String sql) throws SQLException;
 
   boolean execute(String sql) throws SQLException;
+
+  void clearCache(String script);
 }

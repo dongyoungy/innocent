@@ -2,6 +2,7 @@ package dyoon.innocent.database;
 
 import org.pmw.tinylog.Logger;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -36,5 +37,15 @@ public abstract class Database implements DatabaseImpl {
   public boolean execute(String sql) throws SQLException {
     Logger.debug("Executing: {}", sql);
     return conn.createStatement().execute(sql);
+  }
+
+  @Override
+  public void clearCache(String script) {
+    try {
+      Process p = new ProcessBuilder("/bin/bash", script).start();
+      p.waitFor();
+    } catch (IOException | InterruptedException e) {
+      e.printStackTrace();
+    }
   }
 }

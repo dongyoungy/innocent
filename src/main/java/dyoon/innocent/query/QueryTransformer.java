@@ -1,6 +1,7 @@
 package dyoon.innocent.query;
 
 import dyoon.innocent.Sample;
+import dyoon.innocent.Utils;
 import org.apache.calcite.sql.JoinConditionType;
 import org.apache.calcite.sql.JoinType;
 import org.apache.calcite.sql.SqlAsOperator;
@@ -17,6 +18,7 @@ import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.dialect.HiveSqlDialect;
 import org.apache.calcite.sql.fun.SqlAvgAggFunction;
+import org.apache.calcite.sql.fun.SqlCountAggFunction;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.fun.SqlSumAggFunction;
 import org.apache.calcite.sql.parser.SqlParseException;
@@ -29,14 +31,19 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** Created by Dong Young Yoon on 10/29/18. */
 public class QueryTransformer extends SqlShuttle {
 
+  int approxCount;
   int sumCount;
   int avgCount;
+  int aggCount;
+  int cntCount;
+  int errCount;
   int tmpCount;
   private Sample s;
   private SqlIdentifier currentAggAlias;
@@ -44,20 +51,28 @@ public class QueryTransformer extends SqlShuttle {
 
   private List<Pair<SqlIdentifier, SqlIdentifier>> aggAliasPairList;
   private List<SqlNode> extraColumns;
+  private List<String> sampleTableColumns;
+  private Map<Integer, SqlOperator> nonAQPAggList;
 
-  public QueryTransformer(Sample s) {
+  public QueryTransformer(Sample s, List<String> sampleTableColumns) {
+    this.approxCount = 0;
     this.sumCount = 0;
     this.avgCount = 0;
+    this.aggCount = 0;
+    this.cntCount = 0;
+    this.errCount = 0;
     this.tmpCount = 0;
     this.s = s;
 
     this.aggAliasPairList = new ArrayList<>();
+    this.sampleTableColumns = new ArrayList<>(sampleTableColumns);
     this.extraColumns = new ArrayList<>();
+    this.nonAQPAggList = new HashMap<>();
   }
 
   public int approxCount() {
     // number of approximated columns
-    return this.sumCount + this.avgCount;
+    return this.approxCount;
   }
 
   @Override
@@ -66,7 +81,15 @@ public class QueryTransformer extends SqlShuttle {
       // transform SqlSelect only.
       super.visit(call);
       SqlSelect select = (SqlSelect) call;
-      return transform(select);
+      SqlNode node = transform(select);
+      return node;
+    } else if (call instanceof SqlBasicCall) {
+      SqlBasicCall bc = (SqlBasicCall) call;
+      SqlOperator op = bc.getOperator();
+      if (op instanceof SqlAsOperator && bc.operands[0] instanceof SqlSelect) {
+        bc.setOperand(0, bc.operands[0].accept(this));
+      }
+      return bc;
     } else {
       return super.visit(call);
     }
@@ -74,7 +97,7 @@ public class QueryTransformer extends SqlShuttle {
 
   private SqlNode transform(SqlSelect select) {
     // Check selectList contains aggregation
-    AggregationChecker checker = new AggregationChecker();
+    AggregationChecker checker = new AggregationChecker(sampleTableColumns);
     checker.visit(select.getSelectList());
 
     TableSubstitutor substitutor = new TableSubstitutor();
@@ -103,8 +126,12 @@ public class QueryTransformer extends SqlShuttle {
       SqlNodeList outerSelectList = this.cloneSqlNodeList(select.getSelectList());
       SqlNodeList innerSelectList = innerSelect.getSelectList();
 
-      List<SqlBasicCall> innerSelectExtraColumnList = new ArrayList<>();
+      List<SqlNode> innerSelectExtraColumnList = new ArrayList<>();
       List<SqlBasicCall> outerSelectExtraColumnList = new ArrayList<>();
+
+      SqlNodeList innerSelectRemoveColumnList = new SqlNodeList(SqlParserPos.ZERO);
+
+      List<Integer> aggColumnIndexList = new ArrayList<>();
 
       // work on select list
       for (int i = 0; i < origSelectList.size(); ++i) {
@@ -112,44 +139,76 @@ public class QueryTransformer extends SqlShuttle {
         this.currentAggOp = null;
         SqlNode item = origSelectList.get(i);
         SqlNode aggSource = this.getAggregationSource(item);
-        if (aggSource != null) {
-          //          SqlBasicCall agg = (SqlBasicCall) item;
-          SqlOperator op = this.currentAggOp;
+        AggregationAnalyzer aggAnalyzer = new AggregationAnalyzer(sampleTableColumns);
+        item.accept(aggAnalyzer);
+
+        // use this for scaling.
+        SqlIdentifier aggSourceColumn = aggAnalyzer.getAggSourceColumn();
+
+        // this is outer-most aggregation -> decides summary operation in the outer select.
+        SqlOperator firstAggOp = aggAnalyzer.getFirstAggOp();
+
+        // this is aggregation get applied directly on the sample column.
+        SqlOperator firstAggWithSampleColumnOp = aggAnalyzer.getFirstAggWithSampleColumnOp();
+
+        if (aggSourceColumn != null
+            && (firstAggWithSampleColumnOp instanceof SqlSumAggFunction
+                || firstAggWithSampleColumnOp instanceof SqlAvgAggFunction
+                || firstAggWithSampleColumnOp instanceof SqlCountAggFunction)) {
+          // if AQP column exists
+          SqlIdentifier alias = aggAnalyzer.getAlias();
+          SqlIdentifier innerAlias;
+          SqlNode newSource = null, newAgg = null, newAggOp = null;
+          aggColumnIndexList.add(i);
+
+          SqlOperator op = firstAggWithSampleColumnOp;
+          SqlOperator outerOp = firstAggOp;
+
+          if (op instanceof SqlSumAggFunction) {
+
+            ScaledAggBuilder scaledAggBuilder =
+                new ScaledAggBuilder(aggSourceColumn, statAlias, op);
+            innerAlias = alias;
+            newAgg = item.accept(scaledAggBuilder);
+            if (alias == null) {
+              innerAlias = new SqlIdentifier(String.format("sum%d", sumCount++), SqlParserPos.ZERO);
+              alias = innerAlias;
+            }
+            newSource = scaledAggBuilder.getScaledSource();
+            newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
+            ++approxCount;
+          } else if (op instanceof SqlAvgAggFunction) {
+            innerAlias = new SqlIdentifier(String.format("avg%d", avgCount++), SqlParserPos.ZERO);
+            if (alias == null) alias = innerAlias;
+
+            newSource = aggSourceColumn;
+            newAgg = this.alias(this.avg(aggSourceColumn), innerAlias);
+            newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
+            ++approxCount;
+          } else { // count
+            innerAlias = new SqlIdentifier(String.format("cnt%d", cntCount++), SqlParserPos.ZERO);
+            if (alias == null) {
+              alias = innerAlias;
+            }
+
+            newSource = aggSourceColumn;
+            newAgg = this.alias(this.count(aggSourceColumn), innerAlias);
+            newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
+          }
+
+          newAgg = this.addAliasIfNotExists(newAgg, innerAlias);
+          innerSelectList.set(i, newAgg);
+          outerSelectList.set(i, this.alias(newAggOp, alias));
 
           if (op instanceof SqlSumAggFunction || op instanceof SqlAvgAggFunction) {
-            SqlIdentifier alias;
-
-            SqlNode newSource = null, newAgg = null, newAggOp = null;
-
-            if (op instanceof SqlSumAggFunction) {
-              alias = new SqlIdentifier(String.format("sum%d", sumCount++), SqlParserPos.ZERO);
-              if (this.currentAggAlias == null) this.currentAggAlias = alias;
-              // scales the aggregation
-              newSource = constructScaledAgg(aggSource, statAlias);
-              newAgg = this.alias(this.sum(newSource), alias);
-              newAggOp = this.alias(this.sum(alias), this.currentAggAlias);
-
-            } else {
-              alias = new SqlIdentifier(String.format("avg%d", avgCount++), SqlParserPos.ZERO);
-              if (this.currentAggAlias == null) this.currentAggAlias = alias;
-
-              // avg does not need scaling
-              newSource = aggSource;
-              newAgg = this.alias(this.avg(aggSource), alias);
-              //              newAgg = newSource;
-              newAggOp = this.alias(this.avg(alias), this.currentAggAlias);
-            }
-            innerSelectList.set(i, newAgg);
-            outerSelectList.set(i, newAggOp);
-
             SqlIdentifier sampleMeanAlias =
-                new SqlIdentifier(alias.toString() + "_samplemean", SqlParserPos.ZERO);
+                new SqlIdentifier(innerAlias.toString() + "_samplemean", SqlParserPos.ZERO);
             SqlIdentifier groupMeanAlias =
-                new SqlIdentifier(alias.toString() + "_groupmean", SqlParserPos.ZERO);
+                new SqlIdentifier(innerAlias.toString() + "_groupmean", SqlParserPos.ZERO);
             SqlIdentifier varianceAlias =
-                new SqlIdentifier(alias.toString() + "_var", SqlParserPos.ZERO);
+                new SqlIdentifier(innerAlias.toString() + "_var", SqlParserPos.ZERO);
             SqlIdentifier sampleCountAlias =
-                new SqlIdentifier(alias.toString() + "_count", SqlParserPos.ZERO);
+                new SqlIdentifier(innerAlias.toString() + "_count", SqlParserPos.ZERO);
             SqlBasicCall sampleMean = constructSampleMean(newSource, sampleMeanAlias, origGroupBy);
             SqlBasicCall groupMean = constructGroupMean(newSource, groupMeanAlias);
             SqlBasicCall variance = constructVariance(newSource, varianceAlias);
@@ -161,7 +220,10 @@ public class QueryTransformer extends SqlShuttle {
             innerSelectExtraColumnList.add(sampleCount);
 
             SqlIdentifier errorAlias =
-                new SqlIdentifier(this.currentAggAlias.toString() + "_error", SqlParserPos.ZERO);
+                new SqlIdentifier(
+                    String.format("%s_%d_error", alias.toString(), errCount), SqlParserPos.ZERO);
+            //            new SqlIdentifier(this.currentAggAlias.toString() + "_error",
+            // SqlParserPos.ZERO);
 
             try {
               SqlBasicCall error =
@@ -178,21 +240,74 @@ public class QueryTransformer extends SqlShuttle {
                           varianceAlias,
                           sampleCountAlias,
                           errorAlias);
-              outerSelectExtraColumnList.add(error);
+              outerSelectExtraColumnList.add(this.alias(error, errorAlias));
+
+              // add relative error columns
+              SqlIdentifier relErrorAlias =
+                  new SqlIdentifier(
+                      String.format("%s_%d_rel_error", alias.toString(), errCount),
+                      SqlParserPos.ZERO);
+              //              this.currentAggAlias.toString() + "_rel_error", SqlParserPos.ZERO);
+              SqlBasicCall relErrorOp =
+                  new SqlBasicCall(
+                      SqlStdOperatorTable.DIVIDE,
+                      new SqlNode[] {error, newAggOp},
+                      SqlParserPos.ZERO);
+              SqlBasicCall relError =
+                  new SqlBasicCall(
+                      SqlStdOperatorTable.AS,
+                      new SqlNode[] {relErrorOp, relErrorAlias},
+                      SqlParserPos.ZERO);
+              outerSelectExtraColumnList.add(relError);
+              ++errCount;
             } catch (SqlParseException e) {
               e.printStackTrace();
             }
 
-            aggAliasPairList.add(ImmutablePair.of(this.currentAggAlias, errorAlias));
+            aggAliasPairList.add(ImmutablePair.of(alias, errorAlias));
+            //            aggAliasPairList.add(ImmutablePair.of(this.currentAggAlias, errorAlias));
           }
+        } else if (aggSourceColumn == null && firstAggOp != null) {
+          if (aggAnalyzer.getAggSource() != null) {
+            SqlNode innerItem = item;
+            SqlNode outerItem;
+            SqlIdentifier alias = Utils.getAliasIfExists(item);
+            if (alias == null) {
+              alias = new SqlIdentifier(String.format("agg%d", aggCount++), SqlParserPos.ZERO);
+              innerItem = this.alias(innerItem, alias);
+            }
+            if (firstAggOp instanceof SqlAvgAggFunction) {
+              outerItem = this.alias(this.avg(alias), alias);
+            } else {
+              outerItem = this.alias(this.sum(alias), alias);
+            }
+
+            innerSelectList.set(i, innerItem);
+            outerSelectList.set(i, outerItem);
+            //
+            //            innerSelectExtraColumnList.add(aggAnalyzer.getAggSource());
+          } else {
+            innerSelectRemoveColumnList.add(item);
+          }
+          aggColumnIndexList.add(i);
         }
       } // end for
 
-      for (SqlBasicCall col : innerSelectExtraColumnList) {
+      SqlNodeList newInnerSelectlist = new SqlNodeList(SqlParserPos.ZERO);
+      for (SqlNode node : innerSelectList) {
+        if (!Utils.containsNode(node, innerSelectRemoveColumnList)) {
+          newInnerSelectlist.add(node);
+        }
+      }
+      innerSelect.setSelectList(newInnerSelectlist);
+      innerSelectList = innerSelect.getSelectList();
+
+      for (SqlNode col : innerSelectExtraColumnList) {
         innerSelectList.add(col);
       }
       for (SqlBasicCall col : outerSelectExtraColumnList) {
         outerSelectList.add(col);
+        aggColumnIndexList.add(outerSelectList.size() - 1);
       }
       extraColumns.addAll(outerSelectExtraColumnList);
 
@@ -265,10 +380,35 @@ public class QueryTransformer extends SqlShuttle {
           new SqlBasicCall(
               new SqlAsOperator(), new SqlNode[] {innerSelect, tmpAlias}, SqlParserPos.ZERO);
 
-      this.replaceListForOuterQuery(outerSelectList, tmpAlias);
+      // need to add missing group by columns to select list from original query
+      if (origGroupBy != null) {
+        for (SqlNode node : origGroupBy) {
+          SqlIdentifier groupBy = (SqlIdentifier) node;
+          boolean hasGroupBy = false;
+          for (SqlNode n : innerSelect.getSelectList()) {
+            if (n instanceof SqlIdentifier) {
+              SqlIdentifier col = (SqlIdentifier) n;
+              if (col.names
+                  .get(col.names.size() - 1)
+                  .equalsIgnoreCase(groupBy.names.get(groupBy.names.size() - 1))) {
+                hasGroupBy = true;
+                break;
+              }
+            }
+          }
+
+          if (!hasGroupBy) {
+            innerSelect.getSelectList().add(node);
+          }
+        }
+      }
+
+      outerSelectList =
+          this.replaceListForOuterQuery(outerSelectList, tmpAlias, aggColumnIndexList);
       SqlNodeList newGroupBy = this.cloneSqlNodeList(origGroupBy);
       if (newGroupBy != null) {
-        this.replaceListForOuterQuery(newGroupBy, tmpAlias);
+        newGroupBy = replaceGroupByForSampleAlias(newGroupBy, aliasMap);
+        newGroupBy = this.replaceListForOuterQuery(newGroupBy, tmpAlias);
       }
 
       SqlSelect newSelectNode =
@@ -295,19 +435,65 @@ public class QueryTransformer extends SqlShuttle {
     }
   }
 
+  private SqlNode addAliasIfNotExists(SqlNode node, SqlIdentifier alias) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall bc = (SqlBasicCall) node;
+      SqlOperator op = bc.getOperator();
+      if (op instanceof SqlAsOperator) {
+        return node;
+      } else {
+        return this.alias(node, alias);
+      }
+    }
+    return node;
+  }
+
+  private SqlNodeList replaceListForOuterQuery(
+      SqlNodeList outerSelectList, SqlIdentifier alias, List<Integer> aggColumnIndexList) {
+    AliasReplacer replacer = new AliasReplacer(true, alias);
+    for (int i = 0; i < outerSelectList.size(); ++i) {
+      if (!aggColumnIndexList.contains(i)) {
+        SqlNode node = outerSelectList.get(i);
+        SqlNode newNode = node.accept(replacer);
+        if (newNode instanceof SqlIdentifier && nonAQPAggList.containsKey(i)) {
+          SqlIdentifier orig = (SqlIdentifier) newNode;
+          SqlIdentifier newAlias =
+              new SqlIdentifier(orig.names.get(orig.names.size() - 1), SqlParserPos.ZERO);
+          SqlOperator op = nonAQPAggList.get(i);
+          if (op instanceof SqlSumAggFunction || op instanceof SqlCountAggFunction) {
+            newNode = this.alias(this.sum(newNode), newAlias);
+          } else if (op instanceof SqlAvgAggFunction) {
+            newNode = this.alias(this.avg(newNode), newAlias);
+          }
+        }
+        outerSelectList.set(i, newNode);
+      }
+    }
+    return outerSelectList;
+  }
+
   public List<Pair<SqlIdentifier, SqlIdentifier>> getAggAliasPairList() {
     return aggAliasPairList;
+  }
+
+  private SqlNodeList replaceGroupByForSampleAlias(
+      SqlNodeList list, Map<SqlIdentifier, SqlIdentifier> aliasMap) {
+    AliasReplacer replacer = new AliasReplacer(aliasMap);
+    SqlNodeList newGroupBy = (SqlNodeList) list.accept(replacer);
+    return newGroupBy;
+    //    select = (SqlSelect) select.accept(replacer);
   }
 
   private void replaceSelectListForSampleAlias(
       SqlSelect select, Map<SqlIdentifier, SqlIdentifier> aliasMap) {
     AliasReplacer replacer = new AliasReplacer(aliasMap);
-    select.accept(replacer);
+    select = (SqlSelect) select.accept(replacer);
   }
 
-  private void replaceListForOuterQuery(SqlNodeList selectList, SqlIdentifier alias) {
+  private SqlNodeList replaceListForOuterQuery(SqlNodeList selectList, SqlIdentifier alias) {
     AliasReplacer replacer = new AliasReplacer(true, alias);
-    selectList.accept(replacer);
+    //    selectList.accept(replacer);
+    return (SqlNodeList) selectList.accept(replacer);
   }
 
   private SqlBasicCall constructAvgError(
@@ -376,8 +562,9 @@ public class QueryTransformer extends SqlShuttle {
     SqlBasicCall error =
         new SqlBasicCall(
             SqlStdOperatorTable.DIVIDE, new SqlNode[] {stddev, sqrtCount}, SqlParserPos.ZERO);
-    error =
-        new SqlBasicCall(SqlStdOperatorTable.AS, new SqlNode[] {error, alias}, SqlParserPos.ZERO);
+    //    error =
+    //        new SqlBasicCall(SqlStdOperatorTable.AS, new SqlNode[] {error, alias},
+    // SqlParserPos.ZERO);
 
     return error;
   }
@@ -453,8 +640,9 @@ public class QueryTransformer extends SqlShuttle {
     SqlBasicCall error =
         new SqlBasicCall(
             SqlStdOperatorTable.MULTIPLY, new SqlNode[] {stddev, sqrtCount}, SqlParserPos.ZERO);
-    error =
-        new SqlBasicCall(SqlStdOperatorTable.AS, new SqlNode[] {error, alias}, SqlParserPos.ZERO);
+    //    error =
+    //        new SqlBasicCall(SqlStdOperatorTable.AS, new SqlNode[] {error, alias},
+    // SqlParserPos.ZERO);
 
     return error;
   }
@@ -540,12 +728,26 @@ public class QueryTransformer extends SqlShuttle {
         SqlStdOperatorTable.AS, new SqlNode[] {source, alias}, SqlParserPos.ZERO);
   }
 
+  private SqlBasicCall applySummaryForOuterOp(SqlNode source, SqlOperator agg) {
+    if (agg instanceof SqlSumAggFunction) {
+      return this.sum(source);
+    } else if (agg instanceof SqlAvgAggFunction) {
+      return this.avg(source);
+    } else {
+      return this.sum(source);
+    }
+  }
+
   private SqlBasicCall sum(SqlNode source) {
     return new SqlBasicCall(SqlStdOperatorTable.SUM, new SqlNode[] {source}, SqlParserPos.ZERO);
   }
 
   private SqlBasicCall avg(SqlNode source) {
     return new SqlBasicCall(SqlStdOperatorTable.AVG, new SqlNode[] {source}, SqlParserPos.ZERO);
+  }
+
+  private SqlBasicCall count(SqlNode source) {
+    return new SqlBasicCall(SqlStdOperatorTable.COUNT, new SqlNode[] {source}, SqlParserPos.ZERO);
   }
 
   private SqlBasicCall constructScaledAgg(SqlNode aggSource, SqlIdentifier statAlias) {
@@ -624,11 +826,81 @@ public class QueryTransformer extends SqlShuttle {
           bc = (SqlBasicCall) bc.operands[0];
           return getAggregationSource(bc);
         }
-      } else if (op instanceof SqlSumAggFunction || op instanceof SqlAvgAggFunction) {
+      } else if (op instanceof SqlSumAggFunction
+          || op instanceof SqlAvgAggFunction
+          || op instanceof SqlCountAggFunction) {
         this.currentAggOp = op;
         return bc.operands[0];
       }
     }
     return null;
   }
+
+  /**
+   * old impl
+   *
+   * <p>if (aggSource != null) { SqlOperator op = this.currentAggOp;
+   *
+   * <p>if (op instanceof SqlSumAggFunction || op instanceof SqlAvgAggFunction || op instanceof
+   * SqlCountAggFunction) { SqlIdentifier alias;
+   *
+   * <p>SqlNode newSource = null, newAgg = null, newAggOp = null;
+   *
+   * <p>aggColumnIndexList.add(i);
+   *
+   * <p>if (op instanceof SqlSumAggFunction) { alias = new SqlIdentifier(String.format("sum%d",
+   * sumCount++), SqlParserPos.ZERO); if (this.currentAggAlias == null) this.currentAggAlias =
+   * alias; // scales the aggregation newSource = constructScaledAgg(aggSource, statAlias); newAgg =
+   * this.alias(this.sum(newSource), alias); newAggOp = this.sum(alias);
+   *
+   * <p>} else if (op instanceof SqlAvgAggFunction) { alias = new
+   * SqlIdentifier(String.format("avg%d", avgCount++), SqlParserPos.ZERO); if (this.currentAggAlias
+   * == null) this.currentAggAlias = alias;
+   *
+   * <p>// avg does not need scaling newSource = aggSource; newAgg = this.alias(this.avg(aggSource),
+   * alias); // newAgg = newSource; newAggOp = this.avg(alias); } else { alias = new
+   * SqlIdentifier(String.format("count%d", avgCount++), SqlParserPos.ZERO); if
+   * (this.currentAggAlias == null) this.currentAggAlias = alias;
+   *
+   * <p>// For now, we do not handle count for aqp newSource = aggSource; newAgg =
+   * this.alias(this.count(aggSource), alias); newAggOp = this.count(alias); }
+   * innerSelectList.set(i, newAgg); outerSelectList.set(i, this.alias(newAggOp,
+   * this.currentAggAlias));
+   *
+   * <p>if (op instanceof SqlSumAggFunction || op instanceof SqlAvgAggFunction) { SqlIdentifier
+   * sampleMeanAlias = new SqlIdentifier(alias.toString() + "_samplemean", SqlParserPos.ZERO);
+   * SqlIdentifier groupMeanAlias = new SqlIdentifier(alias.toString() + "_groupmean",
+   * SqlParserPos.ZERO); SqlIdentifier varianceAlias = new SqlIdentifier(alias.toString() + "_var",
+   * SqlParserPos.ZERO); SqlIdentifier sampleCountAlias = new SqlIdentifier(alias.toString() +
+   * "_count", SqlParserPos.ZERO); SqlBasicCall sampleMean = constructSampleMean(newSource,
+   * sampleMeanAlias, origGroupBy); SqlBasicCall groupMean = constructGroupMean(newSource,
+   * groupMeanAlias); SqlBasicCall variance = constructVariance(newSource, varianceAlias);
+   * SqlBasicCall sampleCount = constructSampleCount(sampleCountAlias);
+   *
+   * <p>innerSelectExtraColumnList.add(sampleMean); innerSelectExtraColumnList.add(groupMean);
+   * innerSelectExtraColumnList.add(variance); innerSelectExtraColumnList.add(sampleCount);
+   *
+   * <p>SqlIdentifier errorAlias = new SqlIdentifier(this.currentAggAlias.toString() + "_error",
+   * SqlParserPos.ZERO);
+   *
+   * <p>try { SqlBasicCall error = (op instanceof SqlSumAggFunction) ? constructSumError(
+   * sampleMeanAlias, groupMeanAlias, varianceAlias, sampleCountAlias, errorAlias) :
+   * constructAvgError( sampleMeanAlias, groupMeanAlias, varianceAlias, sampleCountAlias,
+   * errorAlias); outerSelectExtraColumnList.add(this.alias(error, errorAlias));
+   *
+   * <p>// add relative error columns SqlIdentifier relErrorAlias = new SqlIdentifier(
+   * this.currentAggAlias.toString() + "_rel_error", SqlParserPos.ZERO); SqlBasicCall relErrorOp =
+   * new SqlBasicCall( SqlStdOperatorTable.DIVIDE, new SqlNode[] {error, newAggOp},
+   * SqlParserPos.ZERO); SqlBasicCall relError = new SqlBasicCall( SqlStdOperatorTable.AS, new
+   * SqlNode[] {relErrorOp, relErrorAlias}, SqlParserPos.ZERO);
+   * outerSelectExtraColumnList.add(relError); } catch (SqlParseException e) { e.printStackTrace();
+   * }
+   *
+   * <p>aggAliasPairList.add(ImmutablePair.of(this.currentAggAlias, errorAlias)); } } } else { //
+   * itme may not be AQP-incompatible agg and we need to take it into account AggTypeDetector
+   * typeDetector = new AggTypeDetector(); item.accept(typeDetector);
+   *
+   * <p>SqlOperator aggType = typeDetector.getAggType(); if (aggType != null) { nonAQPAggList.put(i,
+   * aggType); } } } // end for
+   */
 }

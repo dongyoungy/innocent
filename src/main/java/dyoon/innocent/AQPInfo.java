@@ -1,5 +1,6 @@
 package dyoon.innocent;
 
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -24,6 +25,20 @@ public class AQPInfo {
     this.columnTypeList = new ArrayList<>();
   }
 
+  public boolean isColumnInExpression(String col) {
+    for (Pair<Integer, List<SqlNode>> pair : expressionList) {
+      for (SqlNode node : pair.getValue()) {
+        if (node instanceof SqlIdentifier) {
+          SqlIdentifier id = (SqlIdentifier) node;
+          if (id.getSimple().toLowerCase().equals(col.toLowerCase())) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   public Query getQuery() {
     return q;
   }
@@ -42,6 +57,10 @@ public class AQPInfo {
 
   public List<ColumnType> getColumnTypeList() {
     return columnTypeList;
+  }
+
+  public void setAqpNode(SqlNode aqpNode) {
+    this.aqpNode = aqpNode;
   }
 
   public void setColumnTypeList(List<ColumnType> columnTypeList) {

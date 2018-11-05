@@ -106,7 +106,7 @@ public class TableSubstitutor extends SqlShuttle {
         SqlBasicCall bc = (SqlBasicCall) j.getLeft();
         if (bc.getOperator() instanceof SqlAsOperator && bc.operands[0] instanceof SqlIdentifier) {
           SqlNode newId = this.addTable((SqlIdentifier) bc.operands[0]);
-          bc.setOperand(0, newId);
+          if (newId != null) bc.setOperand(0, newId);
         }
       }
       if (j.getRight() instanceof SqlIdentifier) {

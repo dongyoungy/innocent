@@ -6,8 +6,10 @@ import com.google.common.io.Files;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.database.ImpalaDatabase;
 import dyoon.innocent.query.AggNonAggDetector;
+import dyoon.innocent.query.ErrorColumnPropagator;
 import dyoon.innocent.query.QueryVisitor;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.paukov.combinatorics3.Generator;
 import org.pmw.tinylog.Configurator;
@@ -20,9 +22,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.sql.SQLException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -35,10 +39,6 @@ import java.util.stream.Stream;
 /** Created by Dong Young Yoon on 10/19/18. */
 public class Main {
   public static void main(String[] argv) {
-    //    String sql =
-    //        "WITH ss as (SELECT * from (SELECT * from t1 as ttt, t2, t3 where ttt.id = t2.id and
-    // t3.id = t2.id) tmp), st as (select * from t3 join t4 on t3.c3 = t4.c4) SELECT count(*) as cnt
-    // from customer where c_key = 1 and c_id = 2 group by c1, c2 order by c3 desc";
 
     Args args = new Args();
     JCommander jc = JCommander.newBuilder().addObject(args).build();
@@ -59,69 +59,118 @@ public class Main {
     String db = args.getDatabase();
     String user = "";
     String password = "";
+    String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
 
     // set log level
     Configurator.currentConfig().level(Level.DEBUG).activate();
 
     DatabaseImpl database = new ImpalaDatabase(host, db, user, password);
     Data data = new Data();
-    InnocentEngine engine = new InnocentEngine(database);
+    InnocentEngine engine = new InnocentEngine(database, timestamp);
     File current;
     try {
 
       // temporary section for testing query modification
       if (args.isTest()) {
 
-        int sampleCount = 0;
-
         File tpcdsQueryDir = new File(args.getQueryDir());
         File[] queryFiles = tpcdsQueryDir.listFiles();
         Arrays.sort(queryFiles);
 
-        Sample s =
+        List<Sample> samples = new ArrayList<>();
+
+        Sample s1 =
+            new Sample(
+                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 50000);
+        Sample s2 =
             new Sample(
                 Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 100000);
+        Sample s3 =
+            new Sample(
+                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 200000);
+        Sample s4 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_store_sk"), 50000);
+        Sample s5 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_store_sk"), 100000);
+        Sample s6 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_store_sk"), 200000);
+        Sample s7 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_item_sk"), 50000);
+        Sample s8 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_item_sk"), 100000);
+        Sample s9 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_hdemo_sk"), 50000);
+        Sample s10 =
+            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_hdemo_sk"), 100000);
+        Sample s11 =
+            new Sample(
+                Sample.Type.STRATIFIED,
+                "store_sales",
+                Arrays.asList("ss_sold_date_sk", "ss_store_sk"),
+                50000);
 
-        for (File file : queryFiles) {
-          if (file.isFile()) {
-            String queryFilename = file.getName();
-            if (queryFilename.endsWith("sql")) {
-              String id = Files.getNameWithoutExtension(queryFilename);
-              String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
-              sql = sql.replaceAll(";", "");
+        samples.add(s1);
+        samples.add(s2);
+        samples.add(s3);
+        samples.add(s4);
+        samples.add(s5);
+        samples.add(s6);
+        samples.add(s7);
+        samples.add(s8);
+        samples.add(s9);
+        samples.add(s10);
+        samples.add(s11);
 
-              //              if (!id.equalsIgnoreCase("query29")) {
-              //                continue;
-              //              }
+        for (Sample s : samples) {
+          int sampleCount = 0;
 
-              Logger.info("Parsing: {}", queryFilename);
+          for (File file : queryFiles) {
+            if (file.isFile()) {
+              String queryFilename = file.getName();
+              if (queryFilename.endsWith("sql")) {
+                String id = Files.getNameWithoutExtension(queryFilename);
+                String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
+                sql = sql.replaceAll(";", "");
 
-              String logFile = String.format("./log/%s.log", id);
+                //              if (!id.equalsIgnoreCase("query98")) {
+                //                continue;
+                //              }
 
-              Configurator.currentConfig()
-                  .writer(new ConsoleWriter(), Level.DEBUG)
-                  .addWriter(new FileWriter(logFile), Level.DEBUG)
-                  .activate();
+                Logger.info("Parsing: {}", queryFilename);
 
-              Query q = new Query(id, sql);
-              AQPInfo aqpInfo = engine.rewriteWithSample(q, s);
-              if (aqpInfo != null) {
-                Logger.info("Rewritten query is {}", aqpInfo.getQuery().getAqpQuery());
-                ++sampleCount;
+                File logDir = new File(String.format("./log/%s/", timestamp));
+                logDir.mkdirs();
 
-                AggNonAggDetector detector = new AggNonAggDetector(aqpInfo);
-                aqpInfo.getAqpNode().accept(detector);
-                List<ColumnType> columnTypeList = detector.getColumnTypeList();
-                aqpInfo.setColumnTypeList(columnTypeList);
+                String logFile = String.format("./log/%s/%s.log", timestamp, id);
 
-                engine.runAQPQueryAndCompare(q, aqpInfo);
+                Configurator.currentConfig()
+                    .writer(new ConsoleWriter(), Level.DEBUG)
+                    .addWriter(new FileWriter(logFile), Level.DEBUG)
+                    .activate();
+
+                Query q = new Query(id, sql);
+                AQPInfo aqpInfo = engine.rewriteWithSample(q, s);
+                if (aqpInfo != null) {
+                  Logger.info("Rewritten query is {}", aqpInfo.getQuery().getAqpQuery());
+                  ++sampleCount;
+
+                  ErrorColumnPropagator propagator = new ErrorColumnPropagator();
+                  SqlNode node = aqpInfo.getAqpNode().accept(propagator);
+                  aqpInfo.setAqpNode(node);
+
+                  AggNonAggDetector detector = new AggNonAggDetector(aqpInfo);
+                  aqpInfo.getAqpNode().accept(detector);
+                  List<ColumnType> columnTypeList = detector.getColumnTypeList();
+                  aqpInfo.setColumnTypeList(columnTypeList);
+
+                  engine.runAQPQueryAndCompare(q, aqpInfo, args);
+                }
               }
             }
           }
+
+          Logger.info("Sample used = {}", sampleCount);
         }
-
-        Logger.info("Sample used = {}", sampleCount);
-
         System.exit(0);
       }
 

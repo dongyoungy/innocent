@@ -1,9 +1,15 @@
 package dyoon.innocent.database;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Stopwatch;
 import dyoon.innocent.AQPInfo;
+import dyoon.innocent.Args;
 import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
+import org.apache.calcite.sql.SqlDialect;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlWith;
+import org.apache.calcite.sql.dialect.HiveSqlDialect;
 import org.pmw.tinylog.Logger;
 
 import java.sql.Connection;
@@ -16,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
+import java.util.concurrent.TimeUnit;
 
 /** Created by Dong Young Yoon on 10/23/18. */
 public class ImpalaDatabase extends Database implements DatabaseImpl {
@@ -195,10 +202,14 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   }
 
   @Override
-  public void runQueryAndSaveResult(Query q) throws SQLException {
+  public double runQueryAndSaveResult(Query q, Args args) throws SQLException {
     String resultTable = q.getResultTableName();
-    if (this.checkTableExists(resultTable)) {
-      return;
+    if (this.checkTableExists(resultTable) && !args.isOverwrite() && !args.isMeasureTime()) {
+      return 0;
+    }
+
+    if (args.isOverwrite() || args.isMeasureTime()) {
+      this.execute(String.format("DROP TABLE IF EXISTS %s", resultTable));
     }
 
     String sql =
@@ -206,22 +217,61 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     sql = sql.replaceAll("ASYMMETRIC", "");
     sql = sql.replaceAll("LIMIT 100", "");
     sql = sql.replaceAll("limit 100", "");
+    sql = sql.replaceAll("ROWS ONLY", "");
+    sql = sql.replaceAll("FETCH NEXT", "LIMIT");
+
+    if (args.isMeasureTime()) {
+      this.clearCache(args.getClearCacheScript());
+    }
+    Stopwatch watch = Stopwatch.createStarted();
     this.execute(sql);
+    watch.stop();
+    return watch.elapsed(TimeUnit.MILLISECONDS);
   }
 
   @Override
-  public void runQueryWithSampleAndSaveResult(AQPInfo info) throws SQLException {
+  public double runQueryWithSampleAndSaveResult(AQPInfo info, Args args) throws SQLException {
     String resultTable = info.getAQPResultTableName();
-    if (this.checkTableExists(resultTable)) {
-      return;
+    if (this.checkTableExists(resultTable) && !args.isOverwrite() && !args.isMeasureTime()) {
+      return 0;
     }
 
-    String sql =
-        String.format(
-            "CREATE TABLE %s STORED AS parquet AS %s", resultTable, info.getQuery().getAqpQuery());
+    if (args.isOverwrite() || args.isMeasureTime()) {
+      this.execute(String.format("DROP TABLE IF EXISTS %s", resultTable));
+    }
+
+    String sql = "";
+    SqlDialect dialect = new HiveSqlDialect(SqlDialect.EMPTY_CONTEXT);
+    if (info.getAqpNode() instanceof SqlWith) {
+      List<String> withItems = new ArrayList<>();
+      SqlWith with = (SqlWith) info.getAqpNode();
+      for (SqlNode node : with.withList) {
+        String withSql = node.toSqlString(dialect).toString();
+        withSql = withSql.replaceAll("AS SELECT", "AS (SELECT");
+        withSql += ")";
+        withItems.add(withSql);
+      }
+      String query = with.body.toSqlString(dialect).toString();
+      sql =
+          String.format(
+              "CREATE TABLE %s STORED AS parquet AS WITH %s %s",
+              resultTable, Joiner.on(",").join(withItems), query);
+    } else {
+      String query = info.getAqpNode().toSqlString(dialect).toString();
+      sql = String.format("CREATE TABLE %s STORED AS parquet AS %s", resultTable, query);
+    }
     sql = sql.replaceAll("ASYMMETRIC", "");
     sql = sql.replaceAll("LIMIT 100", "");
     sql = sql.replaceAll("limit 100", "");
+    sql = sql.replaceAll("ROWS ONLY", "");
+    sql = sql.replaceAll("FETCH NEXT", "LIMIT");
+
+    if (args.isMeasureTime()) {
+      this.clearCache(args.getClearCacheScript());
+    }
+    Stopwatch watch = Stopwatch.createStarted();
     this.execute(sql);
+    watch.stop();
+    return watch.elapsed(TimeUnit.MILLISECONDS);
   }
 }
