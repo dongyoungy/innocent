@@ -28,6 +28,7 @@ import java.io.PrintWriter;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -43,6 +44,7 @@ public class InnocentEngine {
     this.database = database;
     this.isSampleUsed = false;
     this.timeCreated = timestamp;
+    this.origRunTimeCache = new HashMap<>();
   }
 
   public boolean isSampleUsed() {
