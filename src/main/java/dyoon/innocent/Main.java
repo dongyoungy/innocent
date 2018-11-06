@@ -79,47 +79,69 @@ public class Main {
 
         List<Sample> samples = new ArrayList<>();
 
-        Sample s1 =
-            new Sample(
-                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 50000);
-        Sample s2 =
-            new Sample(
-                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 100000);
-        Sample s3 =
-            new Sample(
-                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 200000);
-        Sample s4 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_store_sk"), 50000);
-        Sample s5 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_store_sk"), 100000);
-        Sample s6 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_store_sk"), 200000);
-        Sample s7 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_item_sk"), 50000);
-        Sample s8 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_item_sk"), 100000);
-        Sample s9 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_hdemo_sk"), 50000);
-        Sample s10 =
-            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_hdemo_sk"), 100000);
-        Sample s11 =
-            new Sample(
-                Sample.Type.STRATIFIED,
-                "store_sales",
-                Arrays.asList("ss_sold_date_sk", "ss_store_sk"),
-                50000);
+        List<String> tables = database.getTables();
+        for (String table : tables) {
+          String[] tokens = table.split("___");
+          if (tokens.length == 4) {
+            String sampleTable = tokens[0];
+            String[] columns = tokens[2].split("__");
+            int minRows = Integer.parseInt(tokens[3]);
+            Sample s =
+                new Sample(Sample.Type.STRATIFIED, sampleTable, Arrays.asList(columns), minRows);
+            samples.add(s);
+          }
+        }
 
-        samples.add(s1);
-        samples.add(s2);
-        samples.add(s3);
-        samples.add(s4);
-        samples.add(s5);
-        samples.add(s6);
-        samples.add(s7);
-        samples.add(s8);
-        samples.add(s9);
-        samples.add(s10);
-        samples.add(s11);
+        //        Sample s1 =
+        //            new Sample(
+        //                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"),
+        // 50000);
+        //        Sample s2 =
+        //            new Sample(
+        //                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"),
+        // 100000);
+        //        Sample s3 =
+        //            new Sample(
+        //                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"),
+        // 200000);
+        //        Sample s4 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales",
+        // Arrays.asList("ss_store_sk"), 50000);
+        //        Sample s5 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales",
+        // Arrays.asList("ss_store_sk"), 100000);
+        //        Sample s6 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales",
+        // Arrays.asList("ss_store_sk"), 200000);
+        //        Sample s7 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_item_sk"),
+        // 50000);
+        //        Sample s8 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_item_sk"),
+        // 100000);
+        //        Sample s9 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales",
+        // Arrays.asList("ss_hdemo_sk"), 50000);
+        //        Sample s10 =
+        //            new Sample(Sample.Type.STRATIFIED, "store_sales",
+        // Arrays.asList("ss_hdemo_sk"), 100000);
+        //        Sample s11 =
+        //            new Sample(
+        //                Sample.Type.STRATIFIED,
+        //                "store_sales",
+        //                Arrays.asList("ss_sold_date_sk", "ss_store_sk"),
+        //                50000);
+        //        samples.add(s1);
+        //        samples.add(s2);
+        //        samples.add(s3);
+        //        samples.add(s4);
+        //        samples.add(s5);
+        //        samples.add(s6);
+        //        samples.add(s7);
+        //        samples.add(s8);
+        //        samples.add(s9);
+        //        samples.add(s10);
+        //        samples.add(s11);
 
         for (Sample s : samples) {
           int sampleCount = 0;
