@@ -114,7 +114,7 @@ public class QueryTransformer extends SqlShuttle {
 
       // add join with stat table
       SqlNode from = innerSelect.getFrom();
-      String statTable = s.getSampleTableName() + "__stat";
+      String statTable = s.getSampleTableName() + "___stat";
       SqlIdentifier sampleAlias = substitutor.getSampleAlias(s);
       if (sampleAlias == null) {
         sampleAlias = new SqlIdentifier(s.getTable(), SqlParserPos.ZERO);
