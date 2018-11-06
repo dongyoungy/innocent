@@ -69,6 +69,11 @@ public class Main {
     Data data = new Data();
     InnocentEngine engine = new InnocentEngine(database, timestamp);
     File current;
+
+    File logDir = new File(String.format("./log/%s/", timestamp));
+    logDir.mkdirs();
+    String defalutLogFile = String.format("./log/%s/all.log", timestamp);
+
     try {
 
       File tpcdsQueryDir = new File(args.getQueryDir());
@@ -85,9 +90,6 @@ public class Main {
               sql = sql.replaceAll(";", "");
               Logger.info("Parsing: {}", queryFilename);
 
-              File logDir = new File(String.format("./log/%s/", timestamp));
-              logDir.mkdirs();
-
               String logFile = String.format("./log/%s/%s.log", timestamp, id);
               File resFile = new File(String.format("./log/%s/orig_result", timestamp));
               PrintWriter pw = new PrintWriter(resFile);
@@ -95,6 +97,7 @@ public class Main {
               Configurator.currentConfig()
                   .writer(new ConsoleWriter(), Level.DEBUG)
                   .addWriter(new FileWriter(logFile), Level.DEBUG)
+                  .addWriter(new FileWriter(defalutLogFile), Level.DEBUG)
                   .activate();
 
               Query q = new Query(id, sql);
@@ -112,10 +115,17 @@ public class Main {
 
         List<Sample> samples = new ArrayList<>();
         List<String> tables = database.getTables();
+        String[] factTables = args.getFactTables().split(",");
+
+        List<String> factTableList = Arrays.asList(factTables);
+
         for (String table : tables) {
           String[] tokens = table.split("___");
           if (tokens.length == 4) {
             String sampleTable = tokens[0];
+            if (!factTableList.contains(sampleTable)) {
+              continue;
+            }
             String[] columns = tokens[2].split("__");
             int minRows = Integer.parseInt(tokens[3]);
             Sample s =
@@ -192,14 +202,12 @@ public class Main {
 
                 Logger.info("Parsing: {}", queryFilename);
 
-                File logDir = new File(String.format("./log/%s/", timestamp));
-                logDir.mkdirs();
-
                 String logFile = String.format("./log/%s/%s.log", timestamp, id);
 
                 Configurator.currentConfig()
                     .writer(new ConsoleWriter(), Level.DEBUG)
                     .addWriter(new FileWriter(logFile), Level.DEBUG)
+                    .addWriter(new FileWriter(defalutLogFile), Level.DEBUG)
                     .activate();
 
                 Query q = new Query(id, sql);
