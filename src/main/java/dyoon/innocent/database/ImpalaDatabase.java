@@ -79,7 +79,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   @Override
   public void createStratifiedSample(String database, Sample s) throws SQLException {
     String sampleTable = s.getSampleTableName();
-    String sampleStatTable = s.getSampleTableName() + "__stat";
+    String sampleStatTable = s.getSampleTableName() + "___stat";
     String sourceTable = s.getTable();
 
     long maxGroupSize = this.getMaxGroupSize(s.getTable(), s.getColumnSet());

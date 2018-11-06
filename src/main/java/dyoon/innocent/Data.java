@@ -43,6 +43,10 @@ public class Data {
     columnToTable.put(column, table);
   }
 
+  public List<String> getColumns(String table) {
+    return tableToColumns.get(table);
+  }
+
   public void incrementFreq(String column) {
     if (!columnFrequency.containsKey(column)) {
       columnFrequency.put(column, 1);

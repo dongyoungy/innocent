@@ -50,6 +50,6 @@ public class Sample {
   }
 
   public String getSampleTableName() {
-    return String.format("%s__st__%s__%d", table, Joiner.on("_").join(columnSet), minRows);
+    return String.format("%s___st___%s___%d", table, Joiner.on("__").join(columnSet), minRows);
   }
 }

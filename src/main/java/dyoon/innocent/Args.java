@@ -37,6 +37,12 @@ public class Args {
       description = "Comma separated values for minimum rows for stratified samples")
   private String minRows = "";
 
+  @Parameter(
+      names = "--fact-tables",
+      description =
+          "Comma separated values for fact tables to be considered for stratified samples")
+  private String factTables = "";
+
   @Parameter(names = "--query-dir", description = "directory where queries are")
   private String queryDir = "/Users/dyoon/work/impala-tpcds-kit/queries";
 
@@ -96,5 +102,9 @@ public class Args {
 
   public boolean isMeasureTime() {
     return measureTime;
+  }
+
+  public String getFactTables() {
+    return factTables;
   }
 }

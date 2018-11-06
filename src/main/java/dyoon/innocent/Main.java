@@ -174,6 +174,13 @@ public class Main {
         System.exit(0);
       }
 
+      if (args.getFactTables().isEmpty()) {
+        Logger.warn("Fact tables must be given for analysis.");
+        return;
+      }
+
+      String[] factTables = args.getFactTables().split(",");
+
       for (String table : database.getTables()) {
         data.addTable(table);
         List<String> columns = database.getColumns(table);
@@ -191,12 +198,6 @@ public class Main {
             System.out.println("Parsing: " + file.getName());
             String sql = Files.asCharSource(file, Charset.forName("UTF-8")).read();
             sql = sql.replaceAll(";", "");
-            //            sql = "WITH ss as (SELECT count(*) from (SELECT * from t1 as ttt, t2, t3
-            // where ttt.id = t2.id and "
-            //                    + "t3.id = t2.id) tmp), st as (select * from t3 join t4 on t3.c3 =
-            // t4.c4) SELECT count(*) as cnt "
-            //                    + "from customer where c_key = 1 and c_id = 2 group by c1, c2
-            // order by c3 desc";
 
             QueryVisitor visitor = new QueryVisitor();
             engine.parse(sql, visitor);
@@ -213,49 +214,52 @@ public class Main {
               .sorted(Collections.reverseOrder(Map.Entry.comparingByValue()));
       List<Map.Entry<String, Integer>> columnFreqList = sorted.collect(Collectors.toList());
 
-      List<String> storeSalesCols = new ArrayList<>();
-      for (Map.Entry<String, Integer> colFreq : columnFreqList) {
-        if (colFreq.getKey().toLowerCase().startsWith("ss_")) {
-          storeSalesCols.add(colFreq.getKey().toLowerCase());
-        }
-      }
-
-      // Let's only build samples for top-N columns
-      int count = 0;
-      Set<String> columnsForStratified = new HashSet<>();
-      for (String col : storeSalesCols) {
-        if (count < args.getTopNColumns()) columnsForStratified.add(col);
-        ++count;
-      }
-
-      Set<SortedSet<String>> set = new HashSet<>();
-      for (int i = 1; i <= args.getMaxColPerSample(); ++i) {
-        Set<List<String>> collect =
-            Generator.combination(columnsForStratified)
-                .simple(i)
-                .stream()
-                .collect(Collectors.toSet());
-        for (List<String> columns : collect) {
-          SortedSet<String> colSet = new TreeSet<>(columns);
-          set.add(colSet);
-        }
-      }
-
-      List<Integer> minRows = new ArrayList<>();
-      if (args.isCreate()) {
-        if (!args.getMinRows().isEmpty()) {
-          String[] minRowStrings = args.getMinRows().split(",");
-          for (String minRow : minRowStrings) {
-            int val = Integer.parseInt(minRow.trim());
-            Logger.info("Will create stratified samples with min rows = {}", val);
-            minRows.add(val);
+      for (String table : factTables) {
+        List<String> eligibleColumns = new ArrayList<>();
+        List<String> columnsInTable = data.getColumns(table);
+        for (Map.Entry<String, Integer> colFreq : columnFreqList) {
+          if (Utils.containsIgnoreCase(colFreq.getKey(), columnsInTable)) {
+            eligibleColumns.add(colFreq.getKey().toLowerCase());
           }
+        }
 
-          for (SortedSet<String> sampleColumns : set) {
-            for (Integer minRow : minRows) {
-              Sample s = new Sample(Sample.Type.STRATIFIED, "store_sales", sampleColumns, minRow);
-              Logger.info("Creating sample: {}", s.getSampleTableName());
-              database.createStratifiedSample(db, s);
+        // Let's only build samples for top-N columns
+        int count = 0;
+        Set<String> columnsForStratified = new HashSet<>();
+        for (String col : eligibleColumns) {
+          if (count < args.getTopNColumns()) columnsForStratified.add(col);
+          ++count;
+        }
+
+        Set<SortedSet<String>> set = new HashSet<>();
+        for (int i = 1; i <= args.getMaxColPerSample(); ++i) {
+          Set<List<String>> collect =
+              Generator.combination(columnsForStratified)
+                  .simple(i)
+                  .stream()
+                  .collect(Collectors.toSet());
+          for (List<String> columns : collect) {
+            SortedSet<String> colSet = new TreeSet<>(columns);
+            set.add(colSet);
+          }
+        }
+
+        List<Integer> minRows = new ArrayList<>();
+        if (args.isCreate()) {
+          if (!args.getMinRows().isEmpty()) {
+            String[] minRowStrings = args.getMinRows().split(",");
+            for (String minRow : minRowStrings) {
+              int val = Integer.parseInt(minRow.trim());
+              Logger.info("Will create stratified samples with min rows = {}", val);
+              minRows.add(val);
+            }
+
+            for (SortedSet<String> sampleColumns : set) {
+              for (Integer minRow : minRows) {
+                Sample s = new Sample(Sample.Type.STRATIFIED, table, sampleColumns, minRow);
+                Logger.info("Creating sample: {}", s.getSampleTableName());
+                database.createStratifiedSample(db, s);
+              }
             }
           }
         }
