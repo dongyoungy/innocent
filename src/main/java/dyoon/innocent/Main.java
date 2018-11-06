@@ -98,8 +98,13 @@ public class Main {
                   .activate();
 
               Query q = new Query(id, sql);
-              double time = database.runQueryAndSaveResult(q, args);
-              pw.println(String.format("%s,%.4f", q.getId(), time / 1000));
+              try {
+                double time = database.runQueryAndSaveResult(q, args);
+                pw.println(String.format("%s,%.4f", q.getId(), time / 1000));
+              } catch (Exception e) {
+                e.printStackTrace();
+                System.err.println(String.format("%s failed to run.", q.getId()));
+              }
             }
           }
         }
