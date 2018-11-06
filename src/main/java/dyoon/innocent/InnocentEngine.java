@@ -324,8 +324,9 @@ public class InnocentEngine {
     if (pw != null) {
       pw.println(
           String.format(
-              "%s,%.4f,%.4f,%.4f,%.4f,%.4f",
+              "%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f",
               q.getId(),
+              aqpInfo.getSample().getSampleTableName(),
               missingGroupRatio,
               avgPercentError,
               avgRelError,

@@ -118,18 +118,29 @@ public class Main {
         String[] factTables = args.getFactTables().split(",");
 
         List<String> factTableList = Arrays.asList(factTables);
+        List<Integer> minRows = new ArrayList<>();
+        if (!args.getMinRows().isEmpty()) {
+          String[] minRowStrings = args.getMinRows().split(",");
+          for (String minRow : minRowStrings) {
+            int val = Integer.parseInt(minRow.trim());
+            minRows.add(val);
+          }
+        }
 
         for (String table : tables) {
           String[] tokens = table.split("___");
           if (tokens.length == 4) {
             String sampleTable = tokens[0];
-            if (!factTableList.contains(sampleTable)) {
+            if (!factTableList.isEmpty() && !factTableList.contains(sampleTable)) {
               continue;
             }
             String[] columns = tokens[2].split("__");
-            int minRows = Integer.parseInt(tokens[3]);
+            int minRow = Integer.parseInt(tokens[3]);
+            if (!minRows.isEmpty() && !minRows.contains(minRow)) {
+              continue;
+            }
             Sample s =
-                new Sample(Sample.Type.STRATIFIED, sampleTable, Arrays.asList(columns), minRows);
+                new Sample(Sample.Type.STRATIFIED, sampleTable, Arrays.asList(columns), minRow);
             samples.add(s);
           }
         }
