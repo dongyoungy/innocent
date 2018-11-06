@@ -19,6 +19,7 @@ import org.pmw.tinylog.writers.ConsoleWriter;
 import org.pmw.tinylog.writers.FileWriter;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.Charset;
@@ -81,6 +82,10 @@ public class Main {
       Arrays.sort(queryFiles);
       // temporary section for testing query modification
       if (args.isTestOrigQueries()) {
+
+        File resFile = new File(String.format("./log/%s/orig_result", timestamp));
+        PrintWriter pw = new PrintWriter(new FileOutputStream(resFile, true));
+
         for (File file : queryFiles) {
           if (file.isFile()) {
             String queryFilename = file.getName();
@@ -91,8 +96,6 @@ public class Main {
               Logger.info("Parsing: {}", queryFilename);
 
               String logFile = String.format("./log/%s/%s.log", timestamp, id);
-              File resFile = new File(String.format("./log/%s/orig_result", timestamp));
-              PrintWriter pw = new PrintWriter(resFile);
 
               Configurator.currentConfig()
                   .writer(new ConsoleWriter(), Level.DEBUG)
