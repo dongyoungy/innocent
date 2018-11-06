@@ -20,6 +20,7 @@ import org.pmw.tinylog.writers.FileWriter;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.charset.Charset;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
@@ -70,15 +71,41 @@ public class Main {
     File current;
     try {
 
+      File tpcdsQueryDir = new File(args.getQueryDir());
+      File[] queryFiles = tpcdsQueryDir.listFiles();
+      Arrays.sort(queryFiles);
       // temporary section for testing query modification
-      if (args.isTest()) {
+      if (args.isTestOrigQueries()) {
+        for (File file : queryFiles) {
+          if (file.isFile()) {
+            String queryFilename = file.getName();
+            if (queryFilename.endsWith("sql")) {
+              String id = Files.getNameWithoutExtension(queryFilename);
+              String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
+              sql = sql.replaceAll(";", "");
+              Logger.info("Parsing: {}", queryFilename);
 
-        File tpcdsQueryDir = new File(args.getQueryDir());
-        File[] queryFiles = tpcdsQueryDir.listFiles();
-        Arrays.sort(queryFiles);
+              File logDir = new File(String.format("./log/%s/", timestamp));
+              logDir.mkdirs();
+
+              String logFile = String.format("./log/%s/%s.log", timestamp, id);
+              File resFile = new File(String.format("./log/%s/orig_result", timestamp));
+              PrintWriter pw = new PrintWriter(resFile);
+
+              Configurator.currentConfig()
+                  .writer(new ConsoleWriter(), Level.DEBUG)
+                  .addWriter(new FileWriter(logFile), Level.DEBUG)
+                  .activate();
+
+              Query q = new Query(id, sql);
+              double time = database.runQueryAndSaveResult(q, args);
+              pw.println(String.format("%s,%.4f", q.getId(), time / 1000));
+            }
+          }
+        }
+      } else if (args.isTest()) {
 
         List<Sample> samples = new ArrayList<>();
-
         List<String> tables = database.getTables();
         for (String table : tables) {
           String[] tokens = table.split("___");
@@ -193,101 +220,96 @@ public class Main {
 
           Logger.info("Sample used = {}", sampleCount);
         }
-        System.exit(0);
-      }
+      } else {
 
-      if (args.getFactTables().isEmpty()) {
-        Logger.warn("Fact tables must be given for analysis.");
-        return;
-      }
-
-      String[] factTables = args.getFactTables().split(",");
-
-      for (String table : database.getTables()) {
-        data.addTable(table);
-        List<String> columns = database.getColumns(table);
-        for (String column : columns) {
-          data.addColumnToTable(table, column);
+        if (args.getFactTables().isEmpty()) {
+          Logger.warn("Fact tables must be given for analysis.");
+          return;
         }
-      }
 
-      File tpcdsQueryDir = new File(args.getQueryDir());
-      File[] queryFiles = tpcdsQueryDir.listFiles();
-      Arrays.sort(queryFiles);
-      for (File file : queryFiles) {
-        if (file.isFile()) {
-          if (file.getName().endsWith("sql")) {
-            System.out.println("Parsing: " + file.getName());
-            String sql = Files.asCharSource(file, Charset.forName("UTF-8")).read();
-            sql = sql.replaceAll(";", "");
+        String[] factTables = args.getFactTables().split(",");
 
-            QueryVisitor visitor = new QueryVisitor();
-            engine.parse(sql, visitor);
-            for (SqlIdentifier id : visitor.getQueryColumnSet()) {
-              data.incrementFreq(id.names.get(id.names.size() - 1));
+        for (String table : database.getTables()) {
+          data.addTable(table);
+          List<String> columns = database.getColumns(table);
+          for (String column : columns) {
+            data.addColumnToTable(table, column);
+          }
+        }
+
+        for (File file : queryFiles) {
+          if (file.isFile()) {
+            if (file.getName().endsWith("sql")) {
+              System.out.println("Parsing: " + file.getName());
+              String sql = Files.asCharSource(file, Charset.forName("UTF-8")).read();
+              sql = sql.replaceAll(";", "");
+
+              QueryVisitor visitor = new QueryVisitor();
+              engine.parse(sql, visitor);
+              for (SqlIdentifier id : visitor.getQueryColumnSet()) {
+                data.incrementFreq(id.names.get(id.names.size() - 1));
+              }
             }
           }
         }
-      }
-      Stream<Map.Entry<String, Integer>> sorted =
-          data.getColumnFrequency()
-              .entrySet()
-              .stream()
-              .sorted(Collections.reverseOrder(Map.Entry.comparingByValue()));
-      List<Map.Entry<String, Integer>> columnFreqList = sorted.collect(Collectors.toList());
+        Stream<Map.Entry<String, Integer>> sorted =
+            data.getColumnFrequency()
+                .entrySet()
+                .stream()
+                .sorted(Collections.reverseOrder(Map.Entry.comparingByValue()));
+        List<Map.Entry<String, Integer>> columnFreqList = sorted.collect(Collectors.toList());
 
-      for (String table : factTables) {
-        List<String> eligibleColumns = new ArrayList<>();
-        List<String> columnsInTable = data.getColumns(table);
-        for (Map.Entry<String, Integer> colFreq : columnFreqList) {
-          if (Utils.containsIgnoreCase(colFreq.getKey(), columnsInTable)) {
-            eligibleColumns.add(colFreq.getKey().toLowerCase());
-          }
-        }
-
-        // Let's only build samples for top-N columns
-        int count = 0;
-        Set<String> columnsForStratified = new HashSet<>();
-        for (String col : eligibleColumns) {
-          if (count < args.getTopNColumns()) columnsForStratified.add(col);
-          ++count;
-        }
-
-        Set<SortedSet<String>> set = new HashSet<>();
-        for (int i = 1; i <= args.getMaxColPerSample(); ++i) {
-          Set<List<String>> collect =
-              Generator.combination(columnsForStratified)
-                  .simple(i)
-                  .stream()
-                  .collect(Collectors.toSet());
-          for (List<String> columns : collect) {
-            SortedSet<String> colSet = new TreeSet<>(columns);
-            set.add(colSet);
-          }
-        }
-
-        List<Integer> minRows = new ArrayList<>();
-        if (args.isCreate()) {
-          if (!args.getMinRows().isEmpty()) {
-            String[] minRowStrings = args.getMinRows().split(",");
-            for (String minRow : minRowStrings) {
-              int val = Integer.parseInt(minRow.trim());
-              Logger.info("Will create stratified samples with min rows = {}", val);
-              minRows.add(val);
+        for (String table : factTables) {
+          List<String> eligibleColumns = new ArrayList<>();
+          List<String> columnsInTable = data.getColumns(table);
+          for (Map.Entry<String, Integer> colFreq : columnFreqList) {
+            if (Utils.containsIgnoreCase(colFreq.getKey(), columnsInTable)) {
+              eligibleColumns.add(colFreq.getKey().toLowerCase());
             }
+          }
 
-            for (SortedSet<String> sampleColumns : set) {
-              for (Integer minRow : minRows) {
-                Sample s = new Sample(Sample.Type.STRATIFIED, table, sampleColumns, minRow);
-                Logger.info("Creating sample: {}", s.getSampleTableName());
-                database.createStratifiedSample(db, s);
+          // Let's only build samples for top-N columns
+          int count = 0;
+          Set<String> columnsForStratified = new HashSet<>();
+          for (String col : eligibleColumns) {
+            if (count < args.getTopNColumns()) columnsForStratified.add(col);
+            ++count;
+          }
+
+          Set<SortedSet<String>> set = new HashSet<>();
+          for (int i = 1; i <= args.getMaxColPerSample(); ++i) {
+            Set<List<String>> collect =
+                Generator.combination(columnsForStratified)
+                    .simple(i)
+                    .stream()
+                    .collect(Collectors.toSet());
+            for (List<String> columns : collect) {
+              SortedSet<String> colSet = new TreeSet<>(columns);
+              set.add(colSet);
+            }
+          }
+
+          List<Integer> minRows = new ArrayList<>();
+          if (args.isCreate()) {
+            if (!args.getMinRows().isEmpty()) {
+              String[] minRowStrings = args.getMinRows().split(",");
+              for (String minRow : minRowStrings) {
+                int val = Integer.parseInt(minRow.trim());
+                Logger.info("Will create stratified samples with min rows = {}", val);
+                minRows.add(val);
+              }
+
+              for (SortedSet<String> sampleColumns : set) {
+                for (Integer minRow : minRows) {
+                  Sample s = new Sample(Sample.Type.STRATIFIED, table, sampleColumns, minRow);
+                  Logger.info("Creating sample: {}", s.getSampleTableName());
+                  database.createStratifiedSample(db, s);
+                }
               }
             }
           }
         }
       }
-
-      System.out.println("Done.");
     } catch (SqlParseException e) {
       e.printStackTrace();
     } catch (IOException e) {

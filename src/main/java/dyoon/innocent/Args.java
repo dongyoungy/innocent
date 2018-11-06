@@ -16,6 +16,9 @@ public class Args {
   @Parameter(names = "--test", description = "Temporary arg for test")
   private boolean test = false;
 
+  @Parameter(names = "--test-orig-queries", description = "Test queries as-is without samples")
+  private boolean testOrigQueries = false;
+
   @Parameter(
       names = "--top-n-col",
       description = "Consider top-N frequently appearing columns for each fact table")
@@ -102,6 +105,10 @@ public class Args {
 
   public boolean isMeasureTime() {
     return measureTime;
+  }
+
+  public boolean isTestOrigQueries() {
+    return testOrigQueries;
   }
 
   public String getFactTables() {
