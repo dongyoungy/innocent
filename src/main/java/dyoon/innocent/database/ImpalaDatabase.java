@@ -92,6 +92,11 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       return;
     }
 
+    if (this.checkTableExists(sampleTable) && this.checkTableExists(sampleStatTable)) {
+      Logger.info("Sample table '{}' already exists.", sampleTable);
+      return;
+    }
+
     final List<String> factTableColumns = this.getColumns(sourceTable);
     final SortedSet<String> sampleColumns = s.getColumnSet();
     final List<String> sampleColumnsWithFactPrefix = new ArrayList<>();
