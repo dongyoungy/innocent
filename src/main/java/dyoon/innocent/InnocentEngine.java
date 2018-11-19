@@ -28,6 +28,7 @@ import java.io.PrintWriter;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,13 @@ public class InnocentEngine {
     this.origRunTimeCache = new HashMap<>();
   }
 
+  public InnocentEngine() {
+    this.database = null;
+    this.isSampleUsed = false;
+    this.timeCreated = "";
+    this.origRunTimeCache = new HashMap<>();
+  }
+
   public boolean isSampleUsed() {
     return isSampleUsed;
   }
@@ -61,6 +69,11 @@ public class InnocentEngine {
   }
 
   public AQPInfo rewriteWithSample(Query q, Sample s)
+      throws ClassNotFoundException, SQLException, SqlParseException {
+    return this.rewriteWithSample(q, s, true);
+  }
+
+  public AQPInfo rewriteWithSample(Query q, Sample s, boolean isWithError)
       throws SqlParseException, ClassNotFoundException, SQLException {
 
     this.isSampleUsed = false;
@@ -70,8 +83,11 @@ public class InnocentEngine {
     SqlNode node = sqlParser.parseQuery();
 
     if (s != null) {
-      List<String> sampleTableColumns = database.getColumns(s.getTable());
-      QueryTransformer transformer = new QueryTransformer(s, sampleTableColumns);
+      List<String> sampleTableColumns =
+          (database != null)
+              ? database.getColumns(s.getTable())
+              : Arrays.asList("c1", "c2", "c3", "c4"); // latter is for testing
+      QueryTransformer transformer = new QueryTransformer(s, sampleTableColumns, isWithError);
       SqlNode newNode = node.accept(transformer);
 
       newNode = removeOrderBy(newNode);
@@ -92,6 +108,7 @@ public class InnocentEngine {
         q.setAqpQuery(newNode.toSqlString(dialect).toString());
 
         AQPInfo aqpInfo = new AQPInfo(q, s, resolver.getExpressionList(), newNode);
+        aqpInfo.addErrorQueries(transformer.getSelectForError());
 
         return aqpInfo;
       }

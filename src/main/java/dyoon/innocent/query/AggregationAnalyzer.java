@@ -29,6 +29,7 @@ public class AggregationAnalyzer extends SqlShuttle {
   private SqlOperator firstAggWithSampleColumnOp;
   private SqlIdentifier aggSourceColumn;
   private SqlNode aggSource;
+  private SqlBasicCall innerMostAgg;
 
   private List<String> sampleTableColumns;
 
@@ -58,6 +59,10 @@ public class AggregationAnalyzer extends SqlShuttle {
     return aggSource;
   }
 
+  public SqlBasicCall getInnerMostAgg() {
+    return innerMostAgg;
+  }
+
   @Override
   public SqlNode visit(SqlCall call) {
     if (call instanceof SqlBasicCall) {
@@ -75,19 +80,61 @@ public class AggregationAnalyzer extends SqlShuttle {
           }
         }
 
+        InnerMostAggFinder finder = new InnerMostAggFinder(sampleTableColumns);
+        bc.operands[0].accept(finder);
         // check whether operand is a column from the sample table
-        if (bc.operands.length == 1 && bc.operands[0] instanceof SqlIdentifier) {
-          SqlIdentifier id = (SqlIdentifier) bc.operands[0];
-          String idStr = id.names.get(id.names.size() - 1);
-          if (Utils.containsIgnoreCase(idStr, sampleTableColumns)
-              && isFirstAggFunctionWithSampleColumn) {
-            this.aggSourceColumn = id;
-            this.firstAggWithSampleColumnOp = op;
-            this.isFirstAggFunctionWithSampleColumn = false;
-          }
+        if (bc.operands.length == 1 && finder.isInnerMostAgg()) {
+          this.innerMostAgg = bc;
+          this.firstAggWithSampleColumnOp = op;
+
+          //          SqlIdentifier id = (SqlIdentifier) bc.operands[0];
+          //          String idStr = id.names.get(id.names.size() - 1);
+          //          if (Utils.containsIgnoreCase(idStr, sampleTableColumns)
+          //              && isFirstAggFunctionWithSampleColumn) {
+          //            this.aggSourceColumn = id;
+          //            this.firstAggWithSampleColumnOp = op;
+          //            this.isFirstAggFunctionWithSampleColumn = false;
+          //          }
         }
       }
     }
     return super.visit(call);
+  }
+
+  // check whether the current item is in the inner most aggregation.
+  class InnerMostAggFinder extends SqlShuttle {
+    boolean isInnerMostAgg;
+    List<String> sampleTableColumns;
+
+    public InnerMostAggFinder(List<String> sampleTableColumns) {
+      this.isInnerMostAgg = false;
+      this.sampleTableColumns = sampleTableColumns;
+    }
+
+    public boolean isInnerMostAgg() {
+      return isInnerMostAgg;
+    }
+
+    @Override
+    public SqlNode visit(SqlIdentifier id) {
+      String idStr = id.names.get(id.names.size() - 1);
+      if (Utils.containsIgnoreCase(idStr, sampleTableColumns) || idStr.isEmpty()) {
+        this.isInnerMostAgg = true;
+      }
+      return id;
+    }
+
+    @Override
+    public SqlNode visit(SqlCall call) {
+      if (call instanceof SqlBasicCall) {
+        SqlBasicCall bc = (SqlBasicCall) call;
+        SqlOperator op = bc.getOperator();
+        if (op instanceof SqlAggFunction) {
+          this.isInnerMostAgg = false;
+          return call;
+        }
+      }
+      return super.visit(call);
+    }
   }
 }

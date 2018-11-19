@@ -2,6 +2,7 @@ package dyoon.innocent;
 
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ public class AQPInfo {
   private Sample s;
   private List<Pair<Integer, List<SqlNode>>> expressionList;
   private List<ColumnType> columnTypeList;
+  private List<SqlSelect> errorQueries;
   private SqlNode aqpNode;
 
   public AQPInfo(
@@ -23,6 +25,7 @@ public class AQPInfo {
     this.expressionList = expressionList;
     this.aqpNode = aqpNode;
     this.columnTypeList = new ArrayList<>();
+    this.errorQueries = new ArrayList<>();
   }
 
   public boolean isColumnInExpression(String col) {
@@ -66,6 +69,18 @@ public class AQPInfo {
   public void setColumnTypeList(List<ColumnType> columnTypeList) {
     this.columnTypeList.clear();
     this.columnTypeList.addAll(columnTypeList);
+  }
+
+  public void addErrorQuery(SqlSelect select) {
+    errorQueries.add(select);
+  }
+
+  public void addErrorQueries(List<SqlSelect> selectList) {
+    errorQueries.addAll(selectList);
+  }
+
+  public List<SqlSelect> getErrorQueries() {
+    return errorQueries;
   }
 
   public String getAQPResultTableName() {

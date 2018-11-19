@@ -45,16 +45,18 @@ public class QueryTransformer extends SqlShuttle {
   int cntCount;
   int errCount;
   int tmpCount;
+  private boolean isWithError;
   private Sample s;
   private SqlIdentifier currentAggAlias;
   private SqlOperator currentAggOp;
 
   private List<Pair<SqlIdentifier, SqlIdentifier>> aggAliasPairList;
+  private List<SqlSelect> selectForError;
   private List<SqlNode> extraColumns;
   private List<String> sampleTableColumns;
   private Map<Integer, SqlOperator> nonAQPAggList;
 
-  public QueryTransformer(Sample s, List<String> sampleTableColumns) {
+  public QueryTransformer(Sample s, List<String> sampleTableColumns, boolean isWithError) {
     this.approxCount = 0;
     this.sumCount = 0;
     this.avgCount = 0;
@@ -63,9 +65,11 @@ public class QueryTransformer extends SqlShuttle {
     this.errCount = 0;
     this.tmpCount = 0;
     this.s = s;
+    this.isWithError = isWithError;
 
     this.aggAliasPairList = new ArrayList<>();
     this.sampleTableColumns = new ArrayList<>(sampleTableColumns);
+    this.selectForError = new ArrayList<>();
     this.extraColumns = new ArrayList<>();
     this.nonAQPAggList = new HashMap<>();
   }
@@ -75,13 +79,19 @@ public class QueryTransformer extends SqlShuttle {
     return this.approxCount;
   }
 
+  public List<SqlSelect> getSelectForError() {
+    return selectForError;
+  }
+
   @Override
   public SqlNode visit(SqlCall call) {
     if (call instanceof SqlSelect) {
       // transform SqlSelect only.
-      super.visit(call);
+      call = (SqlCall) super.visit(call);
       SqlSelect select = (SqlSelect) call;
-      SqlNode node = transform(select);
+      //      select.setFrom(select.getFrom().accept(this));
+      SqlSelect node = (SqlSelect) transform(select);
+      node.setFrom(node.getFrom().accept(this));
       return node;
     } else if (call instanceof SqlBasicCall) {
       SqlBasicCall bc = (SqlBasicCall) call;
@@ -123,8 +133,12 @@ public class QueryTransformer extends SqlShuttle {
 
       // change agg function in the select to include scaling
       SqlNodeList origSelectList = this.cloneSqlNodeList(select.getSelectList());
-      SqlNodeList outerSelectList = this.cloneSqlNodeList(select.getSelectList());
-      SqlNodeList innerSelectList = innerSelect.getSelectList();
+      //      SqlNodeList outerSelectList = this.cloneSqlNodeList(select.getSelectList());
+      TreeCloner treeCloner = new TreeCloner();
+
+      SqlNodeList outerSelectList = (SqlNodeList) treeCloner.visit(select.getSelectList());
+      SqlNodeList innerSelectList = (SqlNodeList) treeCloner.visit(innerSelect.getSelectList());
+      //      SqlNodeList innerSelectList = innerSelect.getSelectList();
 
       List<SqlNode> innerSelectExtraColumnList = new ArrayList<>();
       List<SqlBasicCall> outerSelectExtraColumnList = new ArrayList<>();
@@ -134,16 +148,18 @@ public class QueryTransformer extends SqlShuttle {
       List<Integer> aggColumnIndexList = new ArrayList<>();
 
       // work on select list
-      for (int i = 0; i < origSelectList.size(); ++i) {
+      for (int i = 0; i < outerSelectList.size(); ++i) {
         this.currentAggAlias = null;
         this.currentAggOp = null;
-        SqlNode item = origSelectList.get(i);
+        SqlNode item = outerSelectList.get(i);
         SqlNode aggSource = this.getAggregationSource(item);
         AggregationAnalyzer aggAnalyzer = new AggregationAnalyzer(sampleTableColumns);
         item.accept(aggAnalyzer);
 
         // use this for scaling.
-        SqlIdentifier aggSourceColumn = aggAnalyzer.getAggSourceColumn();
+        //        SqlIdentifier aggSourceColumn = aggAnalyzer.getAggSourceColumn();
+        SqlBasicCall innerMostAgg = aggAnalyzer.getInnerMostAgg();
+        SqlBasicCall agg = (SqlBasicCall) treeCloner.visit(innerMostAgg);
 
         // this is outer-most aggregation -> decides summary operation in the outer select.
         SqlOperator firstAggOp = aggAnalyzer.getFirstAggOp();
@@ -151,7 +167,7 @@ public class QueryTransformer extends SqlShuttle {
         // this is aggregation get applied directly on the sample column.
         SqlOperator firstAggWithSampleColumnOp = aggAnalyzer.getFirstAggWithSampleColumnOp();
 
-        if (aggSourceColumn != null
+        if (innerMostAgg != null
             && (firstAggWithSampleColumnOp instanceof SqlSumAggFunction
                 || firstAggWithSampleColumnOp instanceof SqlAvgAggFunction
                 || firstAggWithSampleColumnOp instanceof SqlCountAggFunction)) {
@@ -166,39 +182,46 @@ public class QueryTransformer extends SqlShuttle {
 
           if (op instanceof SqlSumAggFunction) {
 
-            ScaledAggBuilder scaledAggBuilder =
-                new ScaledAggBuilder(aggSourceColumn, statAlias, op);
+            //            ScaledAggBuilder scaledAggBuilder = new ScaledAggBuilder(innerMostAgg,
+            // statAlias, op);
+            //            newAgg = item.accept(scaledAggBuilder);
+            //            newSource = scaledAggBuilder.getScaledSource();
             innerAlias = alias;
-            newAgg = item.accept(scaledAggBuilder);
+            newSource = Utils.constructScaledAgg(agg.operands[0], statAlias);
+            agg.setOperand(0, newSource);
             if (alias == null) {
               innerAlias = new SqlIdentifier(String.format("sum%d", sumCount++), SqlParserPos.ZERO);
               alias = innerAlias;
             }
-            newSource = scaledAggBuilder.getScaledSource();
+            newAgg = this.alias(agg, innerAlias);
             newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
-            ++approxCount;
           } else if (op instanceof SqlAvgAggFunction) {
             innerAlias = new SqlIdentifier(String.format("avg%d", avgCount++), SqlParserPos.ZERO);
             if (alias == null) alias = innerAlias;
 
-            newSource = aggSourceColumn;
-            newAgg = this.alias(this.avg(aggSourceColumn), innerAlias);
+            newSource = agg.operands[0];
+            newAgg = this.alias(agg, innerAlias);
+            //            newAgg = this.alias(aggAnalyzer.getInnerMostAgg(), innerAlias);
             newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
-            ++approxCount;
           } else { // count
+            //            ScaledAggBuilder scaledAggBuilder =
+            //                new ScaledAggBuilder(aggSourceColumn, statAlias, op);
             innerAlias = new SqlIdentifier(String.format("cnt%d", cntCount++), SqlParserPos.ZERO);
             if (alias == null) {
               alias = innerAlias;
             }
 
-            newSource = aggSourceColumn;
-            newAgg = this.alias(this.count(aggSourceColumn), innerAlias);
+            newSource = Utils.constructScaledAgg(agg, statAlias);
+            newAgg = this.alias(newSource, innerAlias);
             newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
+            innerMostAgg.setOperator(SqlStdOperatorTable.SUM);
           }
+          ++approxCount;
 
           newAgg = this.addAliasIfNotExists(newAgg, innerAlias);
           innerSelectList.set(i, newAgg);
-          outerSelectList.set(i, this.alias(newAggOp, alias));
+          //          outerSelectList.set(i, this.alias(newAggOp, alias));
+          innerMostAgg.setOperand(0, innerAlias);
 
           if (op instanceof SqlSumAggFunction || op instanceof SqlAvgAggFunction) {
             SqlIdentifier sampleMeanAlias =
@@ -266,8 +289,40 @@ public class QueryTransformer extends SqlShuttle {
 
             aggAliasPairList.add(ImmutablePair.of(alias, errorAlias));
             //            aggAliasPairList.add(ImmutablePair.of(this.currentAggAlias, errorAlias));
+          } else if (op instanceof SqlCountAggFunction) {
+
+            SqlIdentifier gsId = statAlias.plus("groupsize", SqlParserPos.ZERO);
+            SqlBasicCall t1 =
+                new SqlBasicCall(
+                    SqlStdOperatorTable.DIVIDE, new SqlNode[] {agg, gsId}, SqlParserPos.ZERO);
+            SqlBasicCall t2 =
+                new SqlBasicCall(
+                    SqlStdOperatorTable.MINUS,
+                    new SqlNode[] {SqlLiteral.createExactNumeric("1", SqlParserPos.ZERO), t1},
+                    SqlParserPos.ZERO);
+
+            SqlBasicCall t3 =
+                new SqlBasicCall(
+                    SqlStdOperatorTable.MULTIPLY, new SqlNode[] {t1, t2}, SqlParserPos.ZERO);
+            SqlBasicCall error =
+                new SqlBasicCall(
+                    SqlStdOperatorTable.DIVIDE,
+                    new SqlNode[] {this.sqrt(t3), this.sqrt(gsId)},
+                    SqlParserPos.ZERO);
+            SqlIdentifier errorAlias =
+                new SqlIdentifier(
+                    String.format("%s_%d_error", alias.toString(), errCount), SqlParserPos.ZERO);
+            innerSelectExtraColumnList.add(this.alias(error, errorAlias));
+
+            SqlBasicCall outerError =
+                Utils.alias(Utils.sqrt(Utils.sum(Utils.pow(errorAlias, 2))), errorAlias);
+
+            outerSelectExtraColumnList.add(outerError);
+            aggAliasPairList.add(ImmutablePair.of(alias, errorAlias));
           }
-        } else if (aggSourceColumn == null && firstAggOp != null) {
+          //        } else if (aggSourceColumn == null && firstAggOp != null) {
+        } else if (innerMostAgg == null && firstAggOp != null) {
+          // TODO: need to check this path...
           if (aggAnalyzer.getAggSource() != null) {
             SqlNode innerItem = item;
             SqlNode outerItem;
@@ -301,15 +356,6 @@ public class QueryTransformer extends SqlShuttle {
       }
       innerSelect.setSelectList(newInnerSelectlist);
       innerSelectList = innerSelect.getSelectList();
-
-      for (SqlNode col : innerSelectExtraColumnList) {
-        innerSelectList.add(col);
-      }
-      for (SqlBasicCall col : outerSelectExtraColumnList) {
-        outerSelectList.add(col);
-        aggColumnIndexList.add(outerSelectList.size() - 1);
-      }
-      extraColumns.addAll(outerSelectExtraColumnList);
 
       // handle FROM
       // construct join clause
@@ -380,6 +426,12 @@ public class QueryTransformer extends SqlShuttle {
           new SqlBasicCall(
               new SqlAsOperator(), new SqlNode[] {innerSelect, tmpAlias}, SqlParserPos.ZERO);
 
+      SqlBasicCall innerQueryForError =
+          new SqlBasicCall(
+              new SqlAsOperator(),
+              new SqlNode[] {this.cloneSqlSelect(innerSelect), tmpAlias},
+              SqlParserPos.ZERO);
+
       // need to add missing group by columns to select list from original query
       if (origGroupBy != null) {
         for (SqlNode node : origGroupBy) {
@@ -411,7 +463,7 @@ public class QueryTransformer extends SqlShuttle {
         newGroupBy = this.replaceListForOuterQuery(newGroupBy, tmpAlias);
       }
 
-      SqlSelect newSelectNode =
+      SqlSelect newSelectNodeWithError =
           new SqlSelect(
               SqlParserPos.ZERO,
               null,
@@ -425,11 +477,37 @@ public class QueryTransformer extends SqlShuttle {
               null,
               null);
 
+      SqlSelect newSelectNode =
+          new SqlSelect(
+              SqlParserPos.ZERO,
+              null,
+              outerSelectList,
+              innerQueryForError,
+              null,
+              newGroupBy,
+              null,
+              null,
+              null,
+              null,
+              null);
+
+      SqlSelect transformedSelect = this.cloneSqlSelect(newSelectNode);
+
+      for (SqlNode col : innerSelectExtraColumnList) {
+        innerSelectList.add(col);
+      }
+      for (SqlBasicCall col : outerSelectExtraColumnList) {
+        outerSelectList.add(col);
+        aggColumnIndexList.add(outerSelectList.size() - 1);
+      }
+      extraColumns.addAll(outerSelectExtraColumnList);
+
       SqlString newSql = newSelectNode.toSqlString(dialect);
 
-      System.out.println(newSql.toString().toLowerCase());
+      //      System.out.println(newSql.toString().toLowerCase());
+      //      selectForError.add(newSelectNodeForError);
 
-      return newSelectNode;
+      return isWithError ? newSelectNodeWithError : transformedSelect;
     } else {
       return select; // no agg -> no transformation
     }
@@ -748,6 +826,10 @@ public class QueryTransformer extends SqlShuttle {
 
   private SqlBasicCall count(SqlNode source) {
     return new SqlBasicCall(SqlStdOperatorTable.COUNT, new SqlNode[] {source}, SqlParserPos.ZERO);
+  }
+
+  private SqlBasicCall sqrt(SqlNode source) {
+    return new SqlBasicCall(SqlStdOperatorTable.SQRT, new SqlNode[] {source}, SqlParserPos.ZERO);
   }
 
   private SqlBasicCall constructScaledAgg(SqlNode aggSource, SqlIdentifier statAlias) {

@@ -19,12 +19,12 @@ import org.apache.calcite.util.Litmus;
 public class ScaledAggBuilder extends SqlShuttle {
 
   private SqlNode scaledSource;
-  private SqlIdentifier sourceColumn;
+  private SqlNode source;
   private SqlIdentifier statTable;
   private SqlOperator aggOp;
 
-  public ScaledAggBuilder(SqlIdentifier sourceColumn, SqlIdentifier statTable, SqlOperator aggOp) {
-    this.sourceColumn = sourceColumn;
+  public ScaledAggBuilder(SqlNode source, SqlIdentifier statTable, SqlOperator aggOp) {
+    this.source = source;
     this.statTable = statTable;
     this.aggOp = aggOp;
   }
@@ -40,7 +40,7 @@ public class ScaledAggBuilder extends SqlShuttle {
       SqlOperator op = bc.getOperator();
       if (op.equals(aggOp)) {
         SqlNode source = bc.operands[0];
-        if (source.equalsDeep(sourceColumn, Litmus.IGNORE)) {
+        if (source.equalsDeep(source, Litmus.IGNORE)) {
           SqlNode scaled = constructScaledAgg(source, statTable);
           bc.setOperand(0, scaled);
           this.scaledSource = scaled;

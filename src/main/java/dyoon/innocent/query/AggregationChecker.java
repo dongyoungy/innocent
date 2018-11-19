@@ -47,6 +47,8 @@ public class AggregationChecker extends SqlShuttle {
             }
           }
         }
+      } else if (opString.equals("count")) {
+        hasAgg = true;
       }
     }
     return super.visit(call);
