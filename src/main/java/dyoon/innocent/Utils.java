@@ -11,6 +11,7 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.util.Litmus;
 
+import java.util.Collection;
 import java.util.List;
 
 /** Created by Dong Young Yoon on 11/4/18. */
@@ -80,6 +81,21 @@ public class Utils {
         SqlStdOperatorTable.AS, new SqlNode[] {source, alias}, SqlParserPos.ZERO);
   }
 
+  public static SqlBasicCall plus(SqlNode left, SqlNode right) {
+    return new SqlBasicCall(
+        SqlStdOperatorTable.PLUS, new SqlNode[] {left, right}, SqlParserPos.ZERO);
+  }
+
+  public static SqlBasicCall multiply(SqlNode left, SqlNode right) {
+    return new SqlBasicCall(
+        SqlStdOperatorTable.MULTIPLY, new SqlNode[] {left, right}, SqlParserPos.ZERO);
+  }
+
+  public static SqlBasicCall divide(SqlNode left, SqlNode right) {
+    return new SqlBasicCall(
+        SqlStdOperatorTable.DIVIDE, new SqlNode[] {left, right}, SqlParserPos.ZERO);
+  }
+
   public static SqlBasicCall sum(SqlNode source) {
     return new SqlBasicCall(SqlStdOperatorTable.SUM, new SqlNode[] {source}, SqlParserPos.ZERO);
   }
@@ -103,5 +119,38 @@ public class Utils {
           source, SqlLiteral.createExactNumeric(String.format("%d", e), SqlParserPos.ZERO)
         },
         SqlParserPos.ZERO);
+  }
+
+  public static String getLastName(SqlIdentifier id) {
+    return id.names.get(id.names.size() - 1);
+  }
+
+  public static boolean equalsLastName(SqlIdentifier id, String str) {
+    String lastName = id.names.get(id.names.size() - 1);
+    return lastName.equals(str);
+  }
+
+  public static SqlIdentifier matchLastName(Collection<SqlIdentifier> aliasList, SqlIdentifier id) {
+    for (SqlIdentifier alias : aliasList) {
+      String aliasLastName = alias.names.get(alias.names.size() - 1);
+      String idLastName = id.names.get(id.names.size() - 1);
+
+      if (idLastName.equals(aliasLastName)) {
+        return alias;
+      }
+    }
+    return null;
+  }
+
+  public static boolean containsLastName(Collection<SqlIdentifier> aliasList, SqlIdentifier id) {
+    for (SqlIdentifier alias : aliasList) {
+      String aliasLastName = alias.names.get(alias.names.size() - 1);
+      String idLastName = id.names.get(id.names.size() - 1);
+
+      if (idLastName.equals(aliasLastName)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
