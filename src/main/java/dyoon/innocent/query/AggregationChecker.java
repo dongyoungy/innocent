@@ -26,6 +26,11 @@ public class AggregationChecker extends SqlShuttle {
     hasAgg = false;
   }
 
+  public AggregationChecker() {
+    this.sampleTablecolumns = null;
+    this.hasAgg = false;
+  }
+
   public boolean hasAgg() {
     return hasAgg;
   }
@@ -42,7 +47,9 @@ public class AggregationChecker extends SqlShuttle {
           if (operand instanceof SqlIdentifier) {
             SqlIdentifier id = (SqlIdentifier) operand;
             String col = id.names.get(id.names.size() - 1);
-            if (Utils.containsIgnoreCase(col, sampleTablecolumns)) {
+            if (sampleTablecolumns == null) {
+              hasAgg = true;
+            } else if (Utils.containsIgnoreCase(col, sampleTablecolumns)) {
               hasAgg = true;
             }
           }

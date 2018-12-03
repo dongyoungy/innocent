@@ -32,8 +32,10 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Created by Dong Young Yoon on 10/29/18. */
 public class QueryTransformer extends SqlShuttle {
@@ -55,6 +57,7 @@ public class QueryTransformer extends SqlShuttle {
   private List<SqlNode> extraColumns;
   private List<String> sampleTableColumns;
   private Map<Integer, SqlOperator> nonAQPAggList;
+  private Set<SqlNodeList> transformedSelectListSet;
 
   public QueryTransformer(Sample s, List<String> sampleTableColumns, boolean isWithError) {
     this.approxCount = 0;
@@ -72,6 +75,8 @@ public class QueryTransformer extends SqlShuttle {
     this.selectForError = new ArrayList<>();
     this.extraColumns = new ArrayList<>();
     this.nonAQPAggList = new HashMap<>();
+
+    this.transformedSelectListSet = new HashSet<>();
   }
 
   public int approxCount() {
@@ -81,6 +86,10 @@ public class QueryTransformer extends SqlShuttle {
 
   public List<SqlSelect> getSelectForError() {
     return selectForError;
+  }
+
+  public Set<SqlNodeList> getTransformedSelectListSet() {
+    return transformedSelectListSet;
   }
 
   @Override
@@ -106,6 +115,14 @@ public class QueryTransformer extends SqlShuttle {
   }
 
   private SqlNode transform(SqlSelect select) {
+
+    // Add alias to aggregates
+    ExpressionNamer namer = new ExpressionNamer();
+    for (int i = 0; i < select.getSelectList().size(); ++i) {
+      SqlNode node = select.getSelectList().get(i).accept(namer);
+      select.getSelectList().set(i, node);
+    }
+
     // Check selectList contains aggregation
     AggregationChecker checker = new AggregationChecker(sampleTableColumns);
     checker.visit(select.getSelectList());
@@ -172,6 +189,7 @@ public class QueryTransformer extends SqlShuttle {
                 || firstAggWithSampleColumnOp instanceof SqlAvgAggFunction
                 || firstAggWithSampleColumnOp instanceof SqlCountAggFunction)) {
           // if AQP column exists
+          boolean addAlias = false;
           SqlIdentifier alias = aggAnalyzer.getAlias();
           SqlIdentifier innerAlias;
           SqlNode newSource = null, newAgg = null, newAggOp = null;
@@ -192,12 +210,16 @@ public class QueryTransformer extends SqlShuttle {
             if (alias == null) {
               innerAlias = new SqlIdentifier(String.format("sum%d", sumCount++), SqlParserPos.ZERO);
               alias = innerAlias;
+              addAlias = true;
             }
             newAgg = this.alias(agg, innerAlias);
             newAggOp = this.applySummaryForOuterOp(innerAlias, outerOp);
           } else if (op instanceof SqlAvgAggFunction) {
             innerAlias = new SqlIdentifier(String.format("avg%d", avgCount++), SqlParserPos.ZERO);
-            if (alias == null) alias = innerAlias;
+            if (alias == null) {
+              alias = innerAlias;
+              addAlias = true;
+            }
 
             newSource = agg.operands[0];
             newAgg = this.alias(agg, innerAlias);
@@ -209,6 +231,7 @@ public class QueryTransformer extends SqlShuttle {
             innerAlias = new SqlIdentifier(String.format("cnt%d", cntCount++), SqlParserPos.ZERO);
             if (alias == null) {
               alias = innerAlias;
+              addAlias = true;
             }
 
             newSource = Utils.constructScaledAgg(agg, statAlias);
@@ -222,6 +245,9 @@ public class QueryTransformer extends SqlShuttle {
           innerSelectList.set(i, newAgg);
           //          outerSelectList.set(i, this.alias(newAggOp, alias));
           innerMostAgg.setOperand(0, innerAlias);
+          if (addAlias) {
+            outerSelectList.set(i, this.addAliasIfNotExists(item, alias));
+          }
 
           if (op instanceof SqlSumAggFunction || op instanceof SqlAvgAggFunction) {
             SqlIdentifier sampleMeanAlias =
@@ -243,8 +269,7 @@ public class QueryTransformer extends SqlShuttle {
             innerSelectExtraColumnList.add(sampleCount);
 
             SqlIdentifier errorAlias =
-                new SqlIdentifier(
-                    String.format("%s_%d_error", alias.toString(), errCount), SqlParserPos.ZERO);
+                new SqlIdentifier(String.format("%s_error", alias.toString()), SqlParserPos.ZERO);
             //            new SqlIdentifier(this.currentAggAlias.toString() + "_error",
             // SqlParserPos.ZERO);
 
@@ -268,8 +293,7 @@ public class QueryTransformer extends SqlShuttle {
               // add relative error columns
               SqlIdentifier relErrorAlias =
                   new SqlIdentifier(
-                      String.format("%s_%d_rel_error", alias.toString(), errCount),
-                      SqlParserPos.ZERO);
+                      String.format("%s_rel_error", alias.toString()), SqlParserPos.ZERO);
               //              this.currentAggAlias.toString() + "_rel_error", SqlParserPos.ZERO);
               SqlBasicCall relErrorOp =
                   new SqlBasicCall(
@@ -310,8 +334,7 @@ public class QueryTransformer extends SqlShuttle {
                     new SqlNode[] {this.sqrt(t3), this.sqrt(gsId)},
                     SqlParserPos.ZERO);
             SqlIdentifier errorAlias =
-                new SqlIdentifier(
-                    String.format("%s_%d_error", alias.toString(), errCount), SqlParserPos.ZERO);
+                new SqlIdentifier(String.format("%s_error", alias.toString()), SqlParserPos.ZERO);
             innerSelectExtraColumnList.add(this.alias(error, errorAlias));
 
             SqlBasicCall outerError =
@@ -429,7 +452,8 @@ public class QueryTransformer extends SqlShuttle {
       SqlBasicCall innerQueryForError =
           new SqlBasicCall(
               new SqlAsOperator(),
-              new SqlNode[] {this.cloneSqlSelect(innerSelect), tmpAlias},
+              new SqlNode[] {innerSelect, tmpAlias},
+              //              new SqlNode[] {this.cloneSqlSelect(innerSelect), tmpAlias},
               SqlParserPos.ZERO);
 
       // need to add missing group by columns to select list from original query
@@ -506,6 +530,9 @@ public class QueryTransformer extends SqlShuttle {
 
       //      System.out.println(newSql.toString().toLowerCase());
       //      selectForError.add(newSelectNodeForError);
+
+      this.transformedSelectListSet.add(outerSelectList);
+      this.transformedSelectListSet.add(innerSelectList);
 
       return isWithError ? newSelectNodeWithError : transformedSelect;
     } else {

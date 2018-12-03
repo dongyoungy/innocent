@@ -16,13 +16,19 @@ public class AQPInfo {
   private List<Pair<Integer, List<SqlNode>>> expressionList;
   private List<ColumnType> columnTypeList;
   private List<SqlSelect> errorQueries;
+  private List<Pair<SqlIdentifier, SqlIdentifier>> aggToErrorList;
   private SqlNode aqpNode;
 
   public AQPInfo(
-      Query q, Sample s, List<Pair<Integer, List<SqlNode>>> expressionList, SqlNode aqpNode) {
+      Query q,
+      Sample s,
+      List<Pair<Integer, List<SqlNode>>> expressionList,
+      List<Pair<SqlIdentifier, SqlIdentifier>> aggToErrorList,
+      SqlNode aqpNode) {
     this.q = q;
     this.s = s;
     this.expressionList = expressionList;
+    this.aggToErrorList = aggToErrorList;
     this.aqpNode = aqpNode;
     this.columnTypeList = new ArrayList<>();
     this.errorQueries = new ArrayList<>();
@@ -69,6 +75,10 @@ public class AQPInfo {
   public void setColumnTypeList(List<ColumnType> columnTypeList) {
     this.columnTypeList.clear();
     this.columnTypeList.addAll(columnTypeList);
+  }
+
+  public List<Pair<SqlIdentifier, SqlIdentifier>> getAggToErrorList() {
+    return aggToErrorList;
   }
 
   public void addErrorQuery(SqlSelect select) {

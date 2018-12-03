@@ -43,6 +43,16 @@ public class Utils {
     return null;
   }
 
+  public static void setAliasIfPossible(SqlNode node, SqlIdentifier alias) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall bc = (SqlBasicCall) node;
+      SqlOperator op = bc.getOperator();
+      if (op instanceof SqlAsOperator) {
+        bc.setOperand(1, alias);
+      }
+    }
+  }
+
   public static SqlNode stripAliasIfExists(SqlNode node) {
     if (node instanceof SqlBasicCall) {
       SqlBasicCall bc = (SqlBasicCall) node;

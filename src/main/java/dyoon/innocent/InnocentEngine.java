@@ -5,6 +5,7 @@ import com.google.common.math.Stats;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.query.AggregationColumnResolver;
 import dyoon.innocent.query.AliasReplacer;
+import dyoon.innocent.query.ErrorPropagator;
 import dyoon.innocent.query.QueryTransformer;
 import dyoon.innocent.query.QueryVisitor;
 import org.apache.calcite.sql.SqlDialect;
@@ -70,10 +71,16 @@ public class InnocentEngine {
 
   public AQPInfo rewriteWithSample(Query q, Sample s)
       throws ClassNotFoundException, SQLException, SqlParseException {
-    return this.rewriteWithSample(q, s, true);
+    return this.rewriteWithSample(q, s, true, false);
   }
 
   public AQPInfo rewriteWithSample(Query q, Sample s, boolean isWithError)
+      throws ClassNotFoundException, SQLException, SqlParseException {
+    return this.rewriteWithSample(q, s, isWithError, false);
+  }
+
+  public AQPInfo rewriteWithSample(
+      Query q, Sample s, boolean isWithError, boolean doErrorPropagation)
       throws SqlParseException, ClassNotFoundException, SQLException {
 
     this.isSampleUsed = false;
@@ -104,10 +111,17 @@ public class InnocentEngine {
         AggregationColumnResolver resolver = new AggregationColumnResolver(aggAliasList);
         newNode.accept(resolver);
 
+        if (doErrorPropagation) {
+          ErrorPropagator errorPropagator =
+              new ErrorPropagator(aggAliasPairList, transformer.getTransformedSelectListSet());
+          newNode = newNode.accept(errorPropagator);
+        }
+
         SqlDialect dialect = new HiveSqlDialect(SqlDialect.EMPTY_CONTEXT);
         q.setAqpQuery(newNode.toSqlString(dialect).toString());
 
-        AQPInfo aqpInfo = new AQPInfo(q, s, resolver.getExpressionList(), newNode);
+        AQPInfo aqpInfo =
+            new AQPInfo(q, s, resolver.getExpressionList(), aggAliasPairList, newNode);
         aqpInfo.addErrorQueries(transformer.getSelectForError());
 
         return aqpInfo;
