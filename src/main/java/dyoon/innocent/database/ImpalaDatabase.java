@@ -294,6 +294,6 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   @Override
   public void createDatabaseIfNotExists(String database) throws SQLException {
     String sql = String.format("CREATE DATABASE IF NOT EXISTS %s", database);
-    this.execute(database);
+    this.execute(sql);
   }
 }
