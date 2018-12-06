@@ -78,6 +78,12 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
 
   @Override
   public void createStratifiedSample(String database, Sample s) throws SQLException {
+    this.createStratifiedSample(database, database, s);
+  }
+
+  @Override
+  public void createStratifiedSample(String targetDatabase, String sourceDatabase, Sample s)
+      throws SQLException {
     String sampleTable = s.getSampleTableName();
     String sampleStatTable = s.getSampleTableName() + "___stat";
     String sourceTable = s.getTable();
@@ -97,6 +103,8 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       return;
     }
 
+    this.createDatabaseIfNotExists(targetDatabase);
+
     final List<String> factTableColumns = this.getColumns(sourceTable);
     final SortedSet<String> sampleColumns = s.getColumnSet();
     final List<String> sampleColumnsWithFactPrefix = new ArrayList<>();
@@ -109,7 +117,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     final String createSql =
         String.format(
             "CREATE TABLE IF NOT EXISTS %s.%s LIKE %s.%s STORED as parquet",
-            database, sampleTable, database, sourceTable);
+            targetDatabase, sampleTable, sourceDatabase, sourceTable);
 
     this.execute(createSql);
 
@@ -119,10 +127,10 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
                 + "(SELECT fact.*, row_number() OVER (PARTITION BY %s ORDER BY %s) as rownum, "
                 + "count(*) OVER (PARTITION BY %s ORDER BY %s) as groupsize, "
                 + "%d as target_group_sample_size "
-                + "FROM %s as fact "
+                + "FROM %s.%s as fact "
                 + "ORDER BY rand()) tmp "
                 + "WHERE tmp.rownum <= %d",
-            database,
+            targetDatabase,
             sampleTable,
             Joiner.on(",").join(factTableColumns),
             sampleQCSClause,
@@ -130,6 +138,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
             sampleQCSClause,
             sampleQCSClause,
             s.getMinRows(),
+            sourceDatabase,
             sourceTable,
             s.getMinRows());
     System.err.println(String.format("Executing: %s", insertSql));
@@ -150,7 +159,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
         String.format(
             "CREATE TABLE IF NOT EXISTS %s.%s "
                 + "(%s, groupsize bigint, actualsize bigint) STORED AS parquet",
-            database, sampleStatTable, Joiner.on(",").join(statTableColumns));
+            targetDatabase, sampleStatTable, Joiner.on(",").join(statTableColumns));
     System.err.println(String.format("Executing: %s", createStatSql));
     this.execute(createStatSql);
 
@@ -161,24 +170,26 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
         String.format(
             "INSERT OVERWRITE TABLE %s.%s SELECT %s, sample.groupsize as samplesize, "
                 + "fact.groupsize as actualsize FROM "
-                + "(SELECT %s, count(*) as groupsize FROM %s GROUP BY %s) sample, "
-                + "(SELECT %s, count(*) as groupsize FROM %s GROUP BY %s) fact "
+                + "(SELECT %s, count(*) as groupsize FROM %s.%s GROUP BY %s) sample, "
+                + "(SELECT %s, count(*) as groupsize FROM %s.%s GROUP BY %s) fact "
                 + "WHERE %s",
-            database,
+            targetDatabase,
             sampleStatTable,
             selectClause,
             groupByClause,
+            targetDatabase,
             sampleTable,
             groupByClause,
             groupByClause,
+            sourceDatabase,
             sourceTable,
             groupByClause,
             joinClause);
     System.err.println(String.format("Executing: %s", insertStatSql));
     this.execute(insertStatSql);
 
-    this.execute(String.format("COMPUTE STATS %s.%s", database, sampleTable));
-    this.execute(String.format("COMPUTE STATS %s.%s", database, sampleStatTable));
+    this.execute(String.format("COMPUTE STATS %s.%s", targetDatabase, sampleTable));
+    this.execute(String.format("COMPUTE STATS %s.%s", targetDatabase, sampleStatTable));
   }
 
   @Override
@@ -278,5 +289,11 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     this.execute(sql);
     watch.stop();
     return watch.elapsed(TimeUnit.MILLISECONDS);
+  }
+
+  @Override
+  public void createDatabaseIfNotExists(String database) throws SQLException {
+    String sql = String.format("CREATE DATABASE IF NOT EXISTS %s", database);
+    this.execute(database);
   }
 }

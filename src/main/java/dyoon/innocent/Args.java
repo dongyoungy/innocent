@@ -4,6 +4,9 @@ import com.beust.jcommander.Parameter;
 
 /** Created by Dong Young Yoon on 10/23/18. */
 public class Args {
+
+  private static final String INNOCENT_DATABASE_SUFFIX = "_innocent";
+
   @Parameter(names = "--create", description = "Create samples at the end")
   private boolean create = false;
 
@@ -18,6 +21,28 @@ public class Args {
 
   @Parameter(names = "--test-orig-queries", description = "Test queries as-is without samples")
   private boolean testOrigQueries = false;
+
+  @Parameter(
+      names = "--create-duplicate-samples",
+      description = "create duplicate samples for bootstrap")
+  private boolean createDuplicateSamples = false;
+
+  @Parameter(names = "--sample-type", description = "type of sample to create")
+  private String sampleType = "stratified";
+
+  @Parameter(names = "--sample-columns", description = "column set for sample")
+  private String sampleColumns = "";
+
+  @Parameter(names = "--sample-table", description = "table for sample")
+  private String sampleTable = "";
+
+  @Parameter(names = "--sample-row", description = "num rows for sample")
+  private long sampleRows = 0;
+
+  @Parameter(
+      names = "--num-sample-to-create",
+      description = "number of duplicate samples to create")
+  private long numSampleToCreate = 0;
 
   @Parameter(
       names = "--top-n-col",
@@ -57,7 +82,7 @@ public class Args {
   @Parameter(
       names = {"-h", "--host"},
       description = "host")
-  private String host = "c220g5-110932.wisc.cloudlab.us:21050";
+  private String host = "c220g2-011018.wisc.cloudlab.us:21050";
 
   public boolean isCreate() {
     return create;
@@ -113,5 +138,33 @@ public class Args {
 
   public String getFactTables() {
     return factTables;
+  }
+
+  public boolean isCreateDuplicateSamples() {
+    return createDuplicateSamples;
+  }
+
+  public String getSampleType() {
+    return sampleType;
+  }
+
+  public String getSampleColumns() {
+    return sampleColumns;
+  }
+
+  public String getSampleTable() {
+    return sampleTable;
+  }
+
+  public long getSampleRows() {
+    return sampleRows;
+  }
+
+  public long getNumSampleToCreate() {
+    return numSampleToCreate;
+  }
+
+  public String getDatabaseForInnocent() {
+    return database + INNOCENT_DATABASE_SUFFIX;
   }
 }

@@ -23,7 +23,12 @@ public interface DatabaseImpl {
 
   boolean checkTableExists(String database, String table) throws SQLException;
 
+  void createStratifiedSample(String targetDatabase, String sourceDatabase, Sample s)
+      throws SQLException;
+
   void createStratifiedSample(String database, Sample s) throws SQLException;
+
+  void createDatabaseIfNotExists(String database) throws SQLException;
 
   long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException;
 

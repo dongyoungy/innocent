@@ -2,6 +2,7 @@ package dyoon.innocent;
 
 import com.google.common.base.Joiner;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -18,12 +19,14 @@ public class Sample {
   private String table;
   private SortedSet<String> columnSet;
   private long minRows;
+  private int id;
 
   public Sample(Type type, String table, SortedSet<String> columnSet, long minRows) {
     this.type = type;
     this.table = table;
     this.columnSet = columnSet;
     this.minRows = minRows;
+    this.id = 0;
   }
 
   public Sample(Type type, String table, List<String> columnList, long minRows) {
@@ -31,6 +34,15 @@ public class Sample {
     this.table = table;
     this.columnSet = new TreeSet<>(columnList);
     this.minRows = minRows;
+    this.id = 0;
+  }
+
+  public Sample(Type type, String table, Collection<String> columnSet, long minRows, int id) {
+    this.type = type;
+    this.table = table;
+    this.columnSet = new TreeSet<>(columnSet);
+    this.minRows = minRows;
+    this.id = id;
   }
 
   public Type getType() {
@@ -50,6 +62,7 @@ public class Sample {
   }
 
   public String getSampleTableName() {
-    return String.format("%s___st___%s___%d", table, Joiner.on("__").join(columnSet), minRows);
+    return String.format(
+        "%s___st___%s___%d___%d", table, Joiner.on("__").join(columnSet), minRows, id);
   }
 }

@@ -115,6 +115,19 @@ public class Main {
             }
           }
         }
+      } else if (args.isCreateDuplicateSamples()) {
+        String table = args.getSampleTable();
+        String colStr = args.getSampleColumns();
+        String[] columns = colStr.split(",");
+        long minRow = args.getSampleRows();
+        String type = args.getSampleType(); // ignored for now
+        long numSample = args.getNumSampleToCreate();
+
+        for (int i = 1; i <= numSample; ++i) {
+          Sample s = new Sample(Sample.Type.STRATIFIED, table, Arrays.asList(columns), minRow, i);
+          database.createStratifiedSample(args.getDatabaseForInnocent(), args.getDatabase(), s);
+        }
+
       } else if (args.isTest()) {
 
         List<Sample> samples = new ArrayList<>();
@@ -131,23 +144,30 @@ public class Main {
           }
         }
 
-        for (String table : tables) {
-          String[] tokens = table.split("___");
-          if (tokens.length == 4) {
-            String sampleTable = tokens[0];
-            if (!factTableList.isEmpty() && !factTableList.contains(sampleTable)) {
-              continue;
-            }
-            String[] columns = tokens[2].split("__");
-            int minRow = Integer.parseInt(tokens[3]);
-            if (!minRows.isEmpty() && !minRows.contains(minRow)) {
-              continue;
-            }
-            Sample s =
-                new Sample(Sample.Type.STRATIFIED, sampleTable, Arrays.asList(columns), minRow);
-            samples.add(s);
-          }
-        }
+        //        for (String table : tables) {
+        //          String[] tokens = table.split("___");
+        //          if (tokens.length == 4) {
+        //            String sampleTable = tokens[0];
+        //            if (!factTableList.isEmpty() && !factTableList.contains(sampleTable)) {
+        //              continue;
+        //            }
+        //            String[] columns = tokens[2].split("__");
+        //            int minRow = Integer.parseInt(tokens[3]);
+        //            if (!minRows.isEmpty() && !minRows.contains(minRow)) {
+        //              continue;
+        //            }
+        //            Sample s =
+        //                new Sample(Sample.Type.STRATIFIED, sampleTable, Arrays.asList(columns),
+        // minRow);
+        //            samples.add(s);
+        //          }
+        //        }
+
+        // temp
+        Sample s1 =
+            new Sample(
+                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 100000);
+        samples.add(s1);
 
         for (Sample s : samples) {
           int sampleCount = 0;
@@ -160,7 +180,7 @@ public class Main {
                 String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
                 sql = sql.replaceAll(";", "");
 
-                if (!id.equalsIgnoreCase("query39")) {
+                if (!id.equalsIgnoreCase("query42")) {
                   continue;
                 }
 
