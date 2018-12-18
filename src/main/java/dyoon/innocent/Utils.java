@@ -1,5 +1,10 @@
 package dyoon.innocent;
 
+import dyoon.innocent.data.Column;
+import dyoon.innocent.data.EqualPredicate;
+import dyoon.innocent.data.Predicate;
+import dyoon.innocent.data.RangePredicate;
+import dyoon.innocent.data.Table;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlIdentifier;
@@ -10,9 +15,12 @@ import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.util.Litmus;
+import org.pmw.tinylog.Logger;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 /** Created by Dong Young Yoon on 11/4/18. */
 public class Utils {
@@ -162,5 +170,102 @@ public class Utils {
       }
     }
     return false;
+  }
+
+  public static Table findTableByName(Set<Table> tables, String name) {
+    for (Table table : tables) {
+      if (table.getName().equalsIgnoreCase(name)) {
+        return table;
+      }
+    }
+    return null;
+  }
+
+  public static Column findColumnById(Collection<Column> columns, SqlIdentifier id) {
+    String colName = id.names.get(id.names.size() - 1);
+    for (Column column : columns) {
+      if (column.getName().equalsIgnoreCase(colName)) {
+        return column;
+      }
+    }
+    return null;
+  }
+
+  public static List<Column> getAllColumns(Set<Table> tables) {
+    List<Column> allColumns = new ArrayList<>();
+    for (Table table : tables) {
+      allColumns.addAll(table.getColumns());
+    }
+    return allColumns;
+  }
+
+  public static Predicate buildLessThanPredicate(
+      List<Column> allColumns, SqlIdentifier id, Double val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(col, Double.NEGATIVE_INFINITY, val, false, false);
+  }
+
+  public static Predicate buildLessThanEqualPredicate(
+      List<Column> allColumns, SqlIdentifier id, Double val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(col, Double.NEGATIVE_INFINITY, val, false, true);
+  }
+
+  public static Predicate buildGreaterThanPredicate(
+      List<Column> allColumns, SqlIdentifier id, Double val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(col, val, Double.POSITIVE_INFINITY, false, false);
+  }
+
+  public static Predicate buildGreaterThanEqualPredicate(
+      List<Column> allColumns, SqlIdentifier id, Double val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(col, val, Double.POSITIVE_INFINITY, true, false);
+  }
+
+  public static Predicate buildEqualPredicate(
+      List<Column> allColumns, SqlIdentifier id, Double val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new EqualPredicate(col, val);
+  }
+
+  public static RangePredicate buildLessThanPredicate(Column col, Double val) {
+    return new RangePredicate(col, Double.NEGATIVE_INFINITY, val, false, false);
+  }
+
+  public static RangePredicate buildLessThanEqualPredicate(Column col, Double val) {
+    return new RangePredicate(col, Double.NEGATIVE_INFINITY, val, false, true);
+  }
+
+  public static RangePredicate buildGreaterThanPredicate(Column col, Double val) {
+    return new RangePredicate(col, val, Double.POSITIVE_INFINITY, false, false);
+  }
+
+  public static RangePredicate buildGreaterThanEqualPredicate(Column col, Double val) {
+    return new RangePredicate(col, val, Double.POSITIVE_INFINITY, true, false);
+  }
+
+  public static EqualPredicate buildEqualPredicate(Column col, Double val) {
+    return new EqualPredicate(col, val);
   }
 }

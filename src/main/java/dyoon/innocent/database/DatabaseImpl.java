@@ -4,6 +4,7 @@ import dyoon.innocent.AQPInfo;
 import dyoon.innocent.Args;
 import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
+import dyoon.innocent.data.Table;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -16,6 +17,8 @@ public interface DatabaseImpl {
   List<String> getTables() throws SQLException;
 
   List<String> getColumns(String table) throws SQLException;
+
+  List<String> getColumns(String database, String table) throws SQLException;
 
   String getColumnType(String table, String column) throws SQLException;
 
@@ -41,4 +44,8 @@ public interface DatabaseImpl {
   boolean execute(String sql) throws SQLException;
 
   void clearCache(String script);
+
+  String getCatalog() throws SQLException;
+
+  Set<Table> getAllTableAndColumns(String database) throws SQLException;
 }

@@ -19,6 +19,9 @@ public class Args {
   @Parameter(names = "--test", description = "Temporary arg for test")
   private boolean test = false;
 
+  @Parameter(names = "--do-partition", description = "Run partition analysis")
+  private boolean doPartition = false;
+
   @Parameter(names = "--test-orig-queries", description = "Test queries as-is without samples")
   private boolean testOrigQueries = false;
 
@@ -166,5 +169,9 @@ public class Args {
 
   public String getDatabaseForInnocent() {
     return database + INNOCENT_DATABASE_SUFFIX;
+  }
+
+  public boolean isDoPartition() {
+    return doPartition;
   }
 }

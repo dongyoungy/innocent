@@ -17,8 +17,13 @@ import org.apache.calcite.sql.util.SqlShuttle;
  */
 public class ExpressionNamer extends SqlShuttle {
 
-  private static int aggCount = 0;
-  private static int exprCount = 0;
+  private int aggCount;
+  private int exprCount;
+
+  public ExpressionNamer() {
+    this.aggCount = 0;
+    this.exprCount = 0;
+  }
 
   @Override
   public SqlNode visit(SqlCall call) {

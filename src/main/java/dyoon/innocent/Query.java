@@ -12,6 +12,11 @@ public class Query {
     this.query = query;
   }
 
+  @Override
+  public String toString() {
+    return id;
+  }
+
   public String getId() {
     return id;
   }

@@ -26,7 +26,7 @@ public class Sample {
     this.table = table;
     this.columnSet = columnSet;
     this.minRows = minRows;
-    this.id = 0;
+    this.id = 1;
   }
 
   public Sample(Type type, String table, List<String> columnList, long minRows) {
@@ -34,7 +34,7 @@ public class Sample {
     this.table = table;
     this.columnSet = new TreeSet<>(columnList);
     this.minRows = minRows;
-    this.id = 0;
+    this.id = 1;
   }
 
   public Sample(Type type, String table, Collection<String> columnSet, long minRows, int id) {

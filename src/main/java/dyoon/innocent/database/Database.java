@@ -11,6 +11,7 @@ import java.sql.SQLException;
 /** Created by Dong Young Yoon on 10/23/18. */
 public abstract class Database implements DatabaseImpl {
 
+  public static final String RESULT_DATABASE_SUFFIX = "_result";
   protected Connection conn;
 
   @Override
@@ -37,6 +38,11 @@ public abstract class Database implements DatabaseImpl {
   public boolean execute(String sql) throws SQLException {
     Logger.debug("Executing: {}", sql);
     return conn.createStatement().execute(sql);
+  }
+
+  @Override
+  public String getCatalog() throws SQLException {
+    return conn.getCatalog();
   }
 
   @Override

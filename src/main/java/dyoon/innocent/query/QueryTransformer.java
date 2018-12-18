@@ -51,6 +51,7 @@ public class QueryTransformer extends SqlShuttle {
   private Sample s;
   private SqlIdentifier currentAggAlias;
   private SqlOperator currentAggOp;
+  private String sampleDatabase;
 
   private List<Pair<SqlIdentifier, SqlIdentifier>> aggAliasPairList;
   private List<SqlSelect> selectForError;
@@ -59,7 +60,8 @@ public class QueryTransformer extends SqlShuttle {
   private Map<Integer, SqlOperator> nonAQPAggList;
   private Set<SqlNodeList> transformedSelectListSet;
 
-  public QueryTransformer(Sample s, List<String> sampleTableColumns, boolean isWithError) {
+  public QueryTransformer(
+      Sample s, String sampleDatabase, List<String> sampleTableColumns, boolean isWithError) {
     this.approxCount = 0;
     this.sumCount = 0;
     this.avgCount = 0;
@@ -69,6 +71,8 @@ public class QueryTransformer extends SqlShuttle {
     this.tmpCount = 0;
     this.s = s;
     this.isWithError = isWithError;
+
+    this.sampleDatabase = sampleDatabase;
 
     this.aggAliasPairList = new ArrayList<>();
     this.sampleTableColumns = new ArrayList<>(sampleTableColumns);
@@ -127,7 +131,7 @@ public class QueryTransformer extends SqlShuttle {
     AggregationChecker checker = new AggregationChecker(sampleTableColumns);
     checker.visit(select.getSelectList());
 
-    TableSubstitutor substitutor = new TableSubstitutor();
+    TableSubstitutor substitutor = new TableSubstitutor(sampleDatabase);
     substitutor.addTableToSample(s.getTable(), s);
     select = substitutor.substitute(select);
 
@@ -417,7 +421,10 @@ public class QueryTransformer extends SqlShuttle {
               JoinType.INNER.symbol(SqlParserPos.ZERO),
               new SqlBasicCall(
                   new SqlAsOperator(),
-                  new SqlNode[] {new SqlIdentifier(statTable, SqlParserPos.ZERO), statAlias},
+                  new SqlNode[] {
+                    new SqlIdentifier(Arrays.asList(sampleDatabase, statTable), SqlParserPos.ZERO),
+                    statAlias
+                  },
                   SqlParserPos.ZERO),
               JoinConditionType.ON.symbol(SqlParserPos.ZERO),
               joinClause);

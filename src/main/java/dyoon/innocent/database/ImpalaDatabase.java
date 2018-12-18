@@ -6,6 +6,8 @@ import dyoon.innocent.AQPInfo;
 import dyoon.innocent.Args;
 import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
+import dyoon.innocent.data.Column;
+import dyoon.innocent.data.Table;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlWith;
@@ -18,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +62,16 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   public List<String> getColumns(String table) throws SQLException {
     final List<String> columns = new ArrayList<>();
     final ResultSet rs = this.executeQuery(String.format("DESCRIBE %s", table));
+    while (rs.next()) {
+      columns.add(rs.getString(1));
+    }
+    return columns;
+  }
+
+  @Override
+  public List<String> getColumns(String database, String table) throws SQLException {
+    final List<String> columns = new ArrayList<>();
+    final ResultSet rs = this.executeQuery(String.format("DESCRIBE %s.%s", database, table));
     while (rs.next()) {
       columns.add(rs.getString(1));
     }
@@ -220,16 +233,24 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   @Override
   public double runQueryAndSaveResult(Query q, Args args) throws SQLException {
     String resultTable = q.getResultTableName();
-    if (this.checkTableExists(resultTable) && !args.isOverwrite() && !args.isMeasureTime()) {
+    String resultDatabase = args.getDatabase() + Database.RESULT_DATABASE_SUFFIX;
+
+    this.createDatabaseIfNotExists(resultDatabase);
+
+    if (this.checkTableExists(resultDatabase, resultTable)
+        && !args.isOverwrite()
+        && !args.isMeasureTime()) {
       return 0;
     }
 
     if (args.isOverwrite() || args.isMeasureTime()) {
-      this.execute(String.format("DROP TABLE IF EXISTS %s", resultTable));
+      this.execute(String.format("DROP TABLE IF EXISTS %s.%s", resultDatabase, resultTable));
     }
 
     String sql =
-        String.format("CREATE TABLE %s STORED AS parquet AS %s", resultTable, q.getQuery());
+        String.format(
+            "CREATE TABLE %s.%s STORED AS parquet AS %s",
+            resultDatabase, resultTable, q.getQuery());
     sql = sql.replaceAll("ASYMMETRIC", "");
     sql = sql.replaceAll("LIMIT 100", "");
     sql = sql.replaceAll("limit 100", "");
@@ -248,12 +269,18 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   @Override
   public double runQueryWithSampleAndSaveResult(AQPInfo info, Args args) throws SQLException {
     String resultTable = info.getAQPResultTableName();
-    if (this.checkTableExists(resultTable) && !args.isOverwrite() && !args.isMeasureTime()) {
+    String resultDatabase = args.getDatabase() + Database.RESULT_DATABASE_SUFFIX;
+
+    this.createDatabaseIfNotExists(resultDatabase);
+
+    if (this.checkTableExists(resultDatabase, resultTable)
+        && !args.isOverwrite()
+        && !args.isMeasureTime()) {
       return 0;
     }
 
     if (args.isOverwrite() || args.isMeasureTime()) {
-      this.execute(String.format("DROP TABLE IF EXISTS %s", resultTable));
+      this.execute(String.format("DROP TABLE IF EXISTS %s.%s", resultDatabase, resultTable));
     }
 
     String sql = "";
@@ -270,11 +297,13 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       String query = with.body.toSqlString(dialect).toString();
       sql =
           String.format(
-              "CREATE TABLE %s STORED AS parquet AS WITH %s %s",
-              resultTable, Joiner.on(",").join(withItems), query);
+              "CREATE TABLE %s.%s STORED AS parquet AS WITH %s %s",
+              resultDatabase, resultTable, Joiner.on(",").join(withItems), query);
     } else {
       String query = info.getAqpNode().toSqlString(dialect).toString();
-      sql = String.format("CREATE TABLE %s STORED AS parquet AS %s", resultTable, query);
+      sql =
+          String.format(
+              "CREATE TABLE %s.%s STORED AS parquet AS %s", resultDatabase, resultTable, query);
     }
     sql = sql.replaceAll("ASYMMETRIC", "");
     sql = sql.replaceAll("LIMIT 100", "");
@@ -289,6 +318,34 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     this.execute(sql);
     watch.stop();
     return watch.elapsed(TimeUnit.MILLISECONDS);
+  }
+
+  @Override
+  public Set<Table> getAllTableAndColumns(String database) throws SQLException {
+    String sql = String.format("SHOW TABLES IN %s", database);
+    ResultSet rs = this.executeQuery(sql);
+
+    Set<Table> tables = new HashSet<>();
+    // get tables
+    while (rs.next()) {
+      String table = rs.getString(1);
+      tables.add(new Table(table));
+    }
+
+    // get columns for each table
+    for (Table table : tables) {
+      String tableName = table.getName();
+      sql = String.format("DESCRIBE %s.%s", database, tableName);
+      rs = this.executeQuery(sql);
+      while (rs.next()) {
+        String name = rs.getString(1);
+        String type = rs.getString(2);
+        Column c = new Column(table, name, type);
+        table.addColumn(c);
+      }
+    }
+
+    return tables;
   }
 
   @Override

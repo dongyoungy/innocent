@@ -6,10 +6,8 @@ import com.google.common.io.Files;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.database.ImpalaDatabase;
 import dyoon.innocent.query.AggNonAggDetector;
-import dyoon.innocent.query.ErrorColumnPropagator;
 import dyoon.innocent.query.QueryVisitor;
 import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.paukov.combinatorics3.Generator;
 import org.pmw.tinylog.Configurator;
@@ -68,7 +66,7 @@ public class Main {
 
     DatabaseImpl database = new ImpalaDatabase(host, db, user, password);
     Data data = new Data();
-    InnocentEngine engine = new InnocentEngine(database, timestamp);
+    InnocentEngine engine = new InnocentEngine(database, args, timestamp);
     File current;
 
     File logDir = new File(String.format("./log/%s/", timestamp));
@@ -164,10 +162,16 @@ public class Main {
         //        }
 
         // temp
-        Sample s1 =
-            new Sample(
-                Sample.Type.STRATIFIED, "store_sales", Arrays.asList("ss_sold_date_sk"), 100000);
-        samples.add(s1);
+        for (int i = 1; i <= 100; ++i) {
+          Sample s1 =
+              new Sample(
+                  Sample.Type.STRATIFIED,
+                  "store_sales",
+                  Arrays.asList("ss_sold_date_sk"),
+                  10000,
+                  i);
+          samples.add(s1);
+        }
 
         for (Sample s : samples) {
           int sampleCount = 0;
@@ -180,7 +184,7 @@ public class Main {
                 String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
                 sql = sql.replaceAll(";", "");
 
-                if (!id.equalsIgnoreCase("query42")) {
+                if (!id.equalsIgnoreCase("query42_sum")) {
                   continue;
                 }
 
@@ -195,14 +199,15 @@ public class Main {
                     .activate();
 
                 Query q = new Query(id, sql);
-                AQPInfo aqpInfo = engine.rewriteWithSample(q, s);
+                AQPInfo aqpInfo = engine.rewriteWithSample(q, s, true, true);
                 if (aqpInfo != null) {
                   Logger.info("Rewritten query is {}", aqpInfo.getQuery().getAqpQuery());
                   ++sampleCount;
 
-                  ErrorColumnPropagator propagator = new ErrorColumnPropagator();
-                  SqlNode node = aqpInfo.getAqpNode().accept(propagator);
-                  aqpInfo.setAqpNode(node);
+                  //                  ErrorColumnPropagator propagator = new
+                  // ErrorColumnPropagator();
+                  //                  SqlNode node = aqpInfo.getAqpNode().accept(propagator);
+                  //                  aqpInfo.setAqpNode(node);
 
                   AggNonAggDetector detector = new AggNonAggDetector(aqpInfo);
                   aqpInfo.getAqpNode().accept(detector);
@@ -217,6 +222,35 @@ public class Main {
 
           Logger.info("Sample used = {}", sampleCount);
         }
+      } else if (args.isDoPartition()) {
+        for (File file : queryFiles) {
+          if (file.isFile()) {
+            String queryFilename = file.getName();
+            if (queryFilename.endsWith("sql")) {
+              String id = Files.getNameWithoutExtension(queryFilename);
+              String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
+              sql = sql.replaceAll(";", "");
+
+              //              if (!id.equalsIgnoreCase("query42_partition_test")) {
+              //                continue;
+              //              }
+
+              String logFile = String.format("./log/%s/%s.log", timestamp, id);
+
+              Configurator.currentConfig()
+                  .writer(new ConsoleWriter(), Level.DEBUG)
+                  .addWriter(new FileWriter(logFile), Level.DEBUG)
+                  .addWriter(new FileWriter(defalutLogFile), Level.DEBUG)
+                  .activate();
+
+              Query q = new Query(id, sql);
+
+              engine.runPartitionAnalysis(q);
+            }
+          }
+        }
+        engine.findBestColumnsForPartition();
+        System.out.println();
       } else {
 
         if (args.getFactTables().isEmpty()) {

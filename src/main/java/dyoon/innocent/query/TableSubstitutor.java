@@ -13,6 +13,7 @@ import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.util.SqlShuttle;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -27,8 +28,10 @@ public class TableSubstitutor extends SqlShuttle {
   private Set<SqlIdentifier> tableSet;
   private Map<String, Sample> tableToSampleMap;
   private Map<SqlIdentifier, SqlIdentifier> aliasMap;
+  private String sampleDatabase;
 
-  public TableSubstitutor() {
+  public TableSubstitutor(String sampleDatabase) {
+    this.sampleDatabase = sampleDatabase;
     this.numTableSubstitutions = 0;
     this.tableToSampleMap = new HashMap<>();
     this.tableSet = new HashSet<>();
@@ -53,10 +56,15 @@ public class TableSubstitutor extends SqlShuttle {
       for (int i = 0; i < id.names.size(); ++i) {
         if (id.names.get(i).equalsIgnoreCase(entry.getKey())) {
           ++numTableSubstitutions;
+          SqlIdentifier newId =
+              new SqlIdentifier(
+                  Arrays.asList(sampleDatabase, entry.getValue().getSampleTableName()),
+                  SqlParserPos.ZERO);
           return new SqlBasicCall(
               SqlStdOperatorTable.AS,
               new SqlNode[] {
-                id.setName(i, entry.getValue().getSampleTableName()),
+                newId,
+                //                id.setName(i, entry.getValue().getSampleTableName()),
                 this.getSampleAlias(entry.getValue())
               },
               SqlParserPos.ZERO);

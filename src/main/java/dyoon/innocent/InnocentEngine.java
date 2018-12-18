@@ -1,11 +1,20 @@
 package dyoon.innocent;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.HashBasedTable;
 import com.google.common.math.Stats;
+import dyoon.innocent.data.Column;
+import dyoon.innocent.data.Join;
+import dyoon.innocent.data.PartitionSpace;
+import dyoon.innocent.data.Predicate;
+import dyoon.innocent.data.Table;
+import dyoon.innocent.database.Database;
 import dyoon.innocent.database.DatabaseImpl;
+import dyoon.innocent.lp.ILPSolver;
 import dyoon.innocent.query.AggregationColumnResolver;
 import dyoon.innocent.query.AliasReplacer;
 import dyoon.innocent.query.ErrorPropagator;
+import dyoon.innocent.query.JoinAndPredicateFinder;
 import dyoon.innocent.query.QueryTransformer;
 import dyoon.innocent.query.QueryVisitor;
 import org.apache.calcite.sql.SqlDialect;
@@ -31,22 +40,35 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Created by Dong Young Yoon on 10/19/18. */
 public class InnocentEngine {
 
+  private Args args;
   private String timeCreated;
   private boolean isSampleUsed = false;
   private DatabaseImpl database;
   private Map<String, Double> origRunTimeCache;
 
-  public InnocentEngine(DatabaseImpl database, String timestamp) {
+  // for partition analysis
+  private Set<Table> allTables;
+  private List<Column> allColumns;
+  private com.google.common.collect.Table<Table, Column, PartitionSpace> partitionSpaceTable;
+
+  public InnocentEngine(DatabaseImpl database, Args args, String timestamp) {
     this.database = database;
     this.isSampleUsed = false;
     this.timeCreated = timestamp;
     this.origRunTimeCache = new HashMap<>();
+    this.args = args;
+
+    this.allTables = new HashSet<>();
+    this.allColumns = new ArrayList<>();
+    this.partitionSpaceTable = HashBasedTable.create();
   }
 
   public InnocentEngine() {
@@ -67,6 +89,56 @@ public class InnocentEngine {
     SqlNode node = sqlParser.parseQuery();
 
     return node.accept(visitor);
+  }
+
+  public void runPartitionAnalysis(Query q)
+      throws ClassNotFoundException, SqlParseException, SQLException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
+    SqlParser sqlParser = SqlParser.create(q.getQuery());
+    SqlNode node = sqlParser.parseQuery();
+    String[] factTables = args.getFactTables().split(",");
+
+    if (this.allTables.isEmpty()) {
+      allTables = database.getAllTableAndColumns(args.getDatabase());
+      allColumns = Utils.getAllColumns(allTables);
+    }
+
+    JoinAndPredicateFinder joinFinder = new JoinAndPredicateFinder(allTables, allColumns);
+    node.accept(joinFinder);
+
+    Set<Join> joinSet = joinFinder.getJoinSet();
+
+    // do it for each fact table
+    for (String factTable : factTables) {
+      Table t = Utils.findTableByName(allTables, factTable);
+      for (Join join : joinSet) {
+        if (join.getTables().contains(t)) {
+          for (Predicate p : join.getPredicates()) {
+            Column c = p.getColumn();
+            if (!partitionSpaceTable.contains(t, c)) {
+              partitionSpaceTable.put(t, c, new PartitionSpace(t, c));
+            }
+            PartitionSpace ps = partitionSpaceTable.get(t, c);
+            ps.addBoundary(p);
+            ps.addQuery(q);
+          }
+        }
+      }
+    }
+
+    Logger.debug("Partition analysis done for query {}", q.getId());
+  }
+
+  public void findBestColumnsForPartition() {
+    List<PartitionSpace> partitionSpaces = new ArrayList<>();
+    for (com.google.common.collect.Table.Cell<Table, Column, PartitionSpace> cell :
+        partitionSpaceTable.cellSet()) {
+      PartitionSpace ps = cell.getValue();
+      partitionSpaces.add(ps);
+    }
+    int k = 5;
+    ILPSolver.solveForBestColumnForPartition(partitionSpaces, k);
+    Logger.debug("Found best columns for partitioning");
   }
 
   public AQPInfo rewriteWithSample(Query q, Sample s)
@@ -94,7 +166,8 @@ public class InnocentEngine {
           (database != null)
               ? database.getColumns(s.getTable())
               : Arrays.asList("c1", "c2", "c3", "c4"); // latter is for testing
-      QueryTransformer transformer = new QueryTransformer(s, sampleTableColumns, isWithError);
+      QueryTransformer transformer =
+          new QueryTransformer(s, args.getDatabaseForInnocent(), sampleTableColumns, isWithError);
       SqlNode newNode = node.accept(transformer);
 
       newNode = removeOrderBy(newNode);
@@ -169,11 +242,13 @@ public class InnocentEngine {
       return;
     }
 
+    String resultDatabase = args.getDatabase() + Database.RESULT_DATABASE_SUFFIX;
     String originalResultTableName = q.getResultTableName();
     String aqpResultTableName = aqpInfo.getAQPResultTableName();
 
-    List<String> originalResultColumnNames = database.getColumns(originalResultTableName);
-    List<String> aqpResultColumnNames = database.getColumns(aqpResultTableName);
+    List<String> originalResultColumnNames =
+        database.getColumns(resultDatabase, originalResultTableName);
+    List<String> aqpResultColumnNames = database.getColumns(resultDatabase, aqpResultTableName);
     List<ColumnType> aqpResultColumnTypes = aqpInfo.getColumnTypeList();
 
     if (aqpResultColumnNames.size() != aqpResultColumnTypes.size()) {
@@ -282,7 +357,9 @@ public class InnocentEngine {
 
     String selectClause = Joiner.on(",").join(selectItems);
     String fromClause =
-        String.format("%s as o, %s as s", originalResultTableName, aqpResultTableName);
+        String.format(
+            "%s.%s as o, %s.%s as s",
+            resultDatabase, originalResultTableName, resultDatabase, aqpResultTableName);
 
     List<String> joinItems = new ArrayList<>();
     for (int i = 0; i < nonAggOrigColumns.size(); ++i) {
@@ -297,9 +374,11 @@ public class InnocentEngine {
       evalSql += String.format(" WHERE %s", joinClause);
     }
     String origGroupCountSql =
-        String.format("SELECT count(*) as groupcount from %s", originalResultTableName);
+        String.format(
+            "SELECT count(*) as groupcount from %s.%s", resultDatabase, originalResultTableName);
     String aqpGroupCountSql =
-        String.format("SELECT count(*) as groupcount from %s s", aqpResultTableName);
+        String.format(
+            "SELECT count(*) as groupcount from %s.%s s", resultDatabase, aqpResultTableName);
     if (!joinClause.isEmpty()) {
       aqpGroupCountSql += String.format(", %s o WHERE %s", originalResultTableName, joinClause);
     }
