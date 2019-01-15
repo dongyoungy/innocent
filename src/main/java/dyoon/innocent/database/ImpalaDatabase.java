@@ -7,6 +7,7 @@ import dyoon.innocent.Args;
 import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
 import dyoon.innocent.data.Column;
+import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlNode;
@@ -352,5 +353,34 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   public void createDatabaseIfNotExists(String database) throws SQLException {
     String sql = String.format("CREATE DATABASE IF NOT EXISTS %s", database);
     this.execute(sql);
+  }
+
+  @Override
+  public void constructPrejoin(String database, Prejoin p) throws SQLException {
+    List<String> tableNameList = new ArrayList<>();
+    //    for (Table table : p.getTables()) {
+    //      tableNameList.add(table.getName());
+    //    }
+    //
+    //    String fromClause = Joiner.on(",").join(tableNameList);
+    //    List<String> joinExpressions = new ArrayList<>();
+    //    for (Set<String> joinKey : p.getJoinKeys()) {
+    //      if (joinKey.size() == 2) {
+    //        // this should be the case
+    //        List<String> keys = new ArrayList<>(joinKey);
+    //        joinExpressions.add(String.format("%s = %s", keys.get(0), keys.get(1)));
+    //      }
+    //    }
+    //    String joinClause = Joiner.on(" AND ").join(joinExpressions);
+
+    //    String sql =
+    //        String.format(
+    //            "CREATE TABLE %s.%s STORED AS PARQUET AS SELECT * FROM %s WHERE %s",
+    //            database, p.getPrejoinTableName(), fromClause, joinClause);
+    //
+    //    this.execute(sql);
+    //
+    //    sql = String.format("COMPUTE STATS %s.%s", database, p.getPrejoinTableName());
+    //    this.execute(sql);
   }
 }

@@ -7,4 +7,6 @@ public abstract class Predicate {
   public Column getColumn() {
     return column;
   }
+
+  public abstract String toSql();
 }

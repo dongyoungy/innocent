@@ -4,9 +4,10 @@ import java.util.HashSet;
 import java.util.Set;
 
 /** Created by Dong Young Yoon on 2018-12-15. */
-public class Table {
-  private String name;
-  private Set<Column> columns;
+public class Table implements Comparable<Table> {
+
+  protected String name;
+  protected Set<Column> columns;
 
   public Table(String name) {
     this.name = name;
@@ -15,7 +16,7 @@ public class Table {
 
   public Table(String name, Set<Column> columns) {
     this.name = name;
-    this.columns = new HashSet(columns);
+    this.columns = columns;
   }
 
   @Override
@@ -37,6 +38,10 @@ public class Table {
     return false;
   }
 
+  public Table copy() {
+    return new Table(name, columns);
+  }
+
   public void addColumnSet(Set<Column> set) {
     columns.addAll(set);
   }
@@ -51,5 +56,10 @@ public class Table {
 
   public Set<Column> getColumns() {
     return columns;
+  }
+
+  @Override
+  public int compareTo(Table o) {
+    return name.compareTo(o.name);
   }
 }

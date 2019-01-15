@@ -75,6 +75,9 @@ public class Main {
 
     try {
 
+      // create database for innocent first
+      database.createDatabaseIfNotExists(args.getDatabaseForInnocent());
+
       File tpcdsQueryDir = new File(args.getQueryDir());
       File[] queryFiles = tpcdsQueryDir.listFiles();
       Arrays.sort(queryFiles);
@@ -223,6 +226,7 @@ public class Main {
           Logger.info("Sample used = {}", sampleCount);
         }
       } else if (args.isDoPartition()) {
+        Set<Query> allQueries = new HashSet<>();
         for (File file : queryFiles) {
           if (file.isFile()) {
             String queryFilename = file.getName();
@@ -231,7 +235,7 @@ public class Main {
               String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
               sql = sql.replaceAll(";", "");
 
-              //              if (!id.equalsIgnoreCase("query42_partition_test")) {
+              //              if (!id.equalsIgnoreCase("query12")) {
               //                continue;
               //              }
 
@@ -244,12 +248,27 @@ public class Main {
                   .activate();
 
               Query q = new Query(id, sql);
+              allQueries.add(q);
 
-              engine.runPartitionAnalysis(q);
+              engine.runQueryAnalysis(q);
             }
           }
         }
-        engine.findBestColumnsForPartition();
+        Configurator.currentConfig()
+            .writer(new ConsoleWriter(), Level.DEBUG)
+            .addWriter(new FileWriter(defalutLogFile), Level.DEBUG)
+            .activate();
+
+        // construct necessary prejoins
+        engine.buildPrejoins();
+
+        engine.createPartitionCandidates();
+
+        //
+
+        //        engine.buildPartitions();
+        //        engine.findBestColumnsForPartition(6); // k
+
         System.out.println();
       } else {
 
@@ -284,9 +303,7 @@ public class Main {
           }
         }
         Stream<Map.Entry<String, Integer>> sorted =
-            data.getColumnFrequency()
-                .entrySet()
-                .stream()
+            data.getColumnFrequency().entrySet().stream()
                 .sorted(Collections.reverseOrder(Map.Entry.comparingByValue()));
         List<Map.Entry<String, Integer>> columnFreqList = sorted.collect(Collectors.toList());
 
@@ -310,9 +327,7 @@ public class Main {
           Set<SortedSet<String>> set = new HashSet<>();
           for (int i = 1; i <= args.getMaxColPerSample(); ++i) {
             Set<List<String>> collect =
-                Generator.combination(columnsForStratified)
-                    .simple(i)
-                    .stream()
+                Generator.combination(columnsForStratified).simple(i).stream()
                     .collect(Collectors.toSet());
             for (List<String> columns : collect) {
               SortedSet<String> colSet = new TreeSet<>(columns);

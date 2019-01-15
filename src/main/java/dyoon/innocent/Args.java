@@ -70,9 +70,13 @@ public class Args {
 
   @Parameter(
       names = "--fact-tables",
-      description =
-          "Comma separated values for fact tables to be considered for stratified samples")
+      description = "Comma separated values for fact tables to be considered for physical design")
   private String factTables = "";
+
+  @Parameter(
+      names = "--ignore-fact-tables",
+      description = "Comma separated values for fact tables to be ignored for physical design")
+  private String ignoreFactTables = "";
 
   @Parameter(names = "--query-dir", description = "directory where queries are")
   private String queryDir = "/Users/dyoon/work/impala-tpcds-kit/queries";
@@ -165,6 +169,10 @@ public class Args {
 
   public long getNumSampleToCreate() {
     return numSampleToCreate;
+  }
+
+  public String getIgnoreFactTables() {
+    return ignoreFactTables;
   }
 
   public String getDatabaseForInnocent() {

@@ -1,6 +1,7 @@
 package dyoon.innocent.data;
 
 import dyoon.innocent.Query;
+import dyoon.innocent.Utils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -13,7 +14,7 @@ import java.util.TreeSet;
 public class PartitionSpace {
   private Table factTable;
   private Column column;
-  private List<Predicate> partitions;
+  private List<Partition> partitions;
   private SortedSet<Double> boundaries;
   private Set<Query> queries;
 
@@ -33,6 +34,28 @@ public class PartitionSpace {
     return queries;
   }
 
+  // create partitions based on boundaries
+  public void createPartitions() {
+    List<Double> boundaryList = new ArrayList<>(boundaries);
+    for (int i = 0; i < boundaryList.size(); ++i) {
+      double value = boundaryList.get(i);
+      if (i == 0) {
+        Predicate lt = Utils.buildLessThanPredicate(column, value);
+        partitions.add(new Partition(lt));
+      }
+      Predicate eq = Utils.buildEqualPredicate(column, value);
+      partitions.add(new Partition(eq));
+      if (i < boundaryList.size() - 1) {
+        double nextVal = boundaryList.get(i + 1);
+        Predicate pred = Utils.buildRangePredicate(column, value, nextVal);
+        partitions.add(new Partition(pred));
+      } else {
+        Predicate gt = Utils.buildGreaterThanPredicate(column, value);
+        partitions.add(new Partition(gt));
+      }
+    }
+  }
+
   // Add a boundary defined by predicate p
   public void addBoundary(Predicate p) {
     if (p instanceof EqualPredicate) {
@@ -48,93 +71,5 @@ public class PartitionSpace {
         boundaries.add(r.getLowerBound());
       }
     }
-  }
-
-  private void addRangePartition(RangePredicate r) {
-
-    // check equal partition
-    for (Predicate p : partitions) {
-      if (r.isEqual(p)) {
-        return;
-      }
-    }
-
-    // check partition with same bound
-    for (Predicate p : partitions) {
-      if (r.hasSameBound(p)) {
-        double equalVal =
-            (r.getLowerBound() != Double.NEGATIVE_INFINITY) ? r.getLowerBound() : r.getUpperBound();
-        EqualPredicate eq = new EqualPredicate(this.column, equalVal);
-        this.addEqualPartition(eq);
-        RangePredicate range = (RangePredicate) p;
-        range.setLowerInclusive(false);
-        range.setUpperInclusive(false);
-        return;
-      }
-    }
-
-    // check intersecting partition
-    for (int i = 0; i < partitions.size(); ++i) {
-      Predicate p = partitions.get(i);
-      RangePredicate intersect = r.getIntersect(p);
-      if (intersect != null && !intersect.isEqual(p)) {
-        partitions.set(i, intersect);
-        return;
-      }
-    }
-
-    // check covering partition
-    RangePredicate toAdd = null;
-    for (int i = 0; i < partitions.size(); ++i) {
-      Predicate p = partitions.get(i);
-      if (p instanceof RangePredicate) {
-        RangePredicate range = (RangePredicate) p;
-        RangePredicate cover1 = r.getCover(range);
-        RangePredicate cover2 = range.getCover(r);
-        if (cover1 != null) {
-          toAdd = cover1;
-          break;
-        }
-        if (cover2 != null) {
-          partitions.set(i, cover2);
-          toAdd = r;
-          break;
-        }
-      }
-    }
-
-    if (toAdd != null) {
-      partitions.add(toAdd);
-      return;
-    }
-
-    // if none of the above, just add it as-is
-    partitions.add(r);
-  }
-
-  private void addEqualPartition(EqualPredicate eq) {
-    for (int i = 0; i < partitions.size(); ++i) {
-      Predicate p = partitions.get(i);
-      if (eq.isOverlap(p)) {
-        if (p instanceof EqualPredicate) {
-          // already exists, so do nothing
-          return;
-        } else if (p instanceof RangePredicate) {
-          // it overlaps with existing range predicate
-          RangePredicate range = (RangePredicate) p;
-          // existing range predicate is no longer inclusive
-          if (range.getUpperBound() == eq.getValue()) {
-            range.setUpperInclusive(false);
-          } else if (range.getLowerBound() == eq.getValue()) {
-            range.setLowerInclusive(false);
-          }
-          // add new equal predicate
-          partitions.add(eq);
-          return;
-        }
-      }
-    }
-    // no existing partition overlaps, so just add
-    partitions.add(eq);
   }
 }

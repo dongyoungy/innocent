@@ -16,7 +16,8 @@ import java.util.Set;
 /** Created by Dong Young Yoon on 2018-12-17. */
 public class ILPSolver {
 
-  public static void solveForBestColumnForPartition(List<PartitionSpace> partitionSpaces, int k) {
+  public static List<PartitionSpace> solveForBestColumnForPartition(
+      List<PartitionSpace> partitionSpaces, int k) {
     Model m = new Model("test");
     Set<String> querySet = new HashSet<>();
     Map<String, List<IntVar>> qToPs = new HashMap<>();
@@ -75,8 +76,14 @@ public class ILPSolver {
     }
     m.getSolver().printStatistics();
 
+    List<PartitionSpace> result = new ArrayList<>();
     for (i = 0; i < psVar.length; ++i) {
       System.out.println(String.format("ps_%d = %d", i, solution.getIntVal(psVar[i])));
+      if (solution.getIntVal(psVar[i]) == 1) {
+        result.add(partitionSpaces.get(i));
+      }
     }
+
+    return result;
   }
 }

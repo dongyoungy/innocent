@@ -1,5 +1,6 @@
 package dyoon.innocent;
 
+import dyoon.innocent.data.AliasedTable;
 import dyoon.innocent.data.Column;
 import dyoon.innocent.data.EqualPredicate;
 import dyoon.innocent.data.Predicate;
@@ -19,6 +20,7 @@ import org.pmw.tinylog.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -143,6 +145,13 @@ public class Utils {
     return id.names.get(id.names.size() - 1);
   }
 
+  public static String getTableAlias(SqlIdentifier id) {
+    if (id.names.size() > 1) {
+      return id.names.get(id.names.size() - 2);
+    }
+    return null;
+  }
+
   public static boolean equalsLastName(SqlIdentifier id, String str) {
     String lastName = id.names.get(id.names.size() - 1);
     return lastName.equals(str);
@@ -181,11 +190,97 @@ public class Utils {
     return null;
   }
 
+  public static int containsTableAny(Set<Table> tables, String[] names) {
+    int count = 0;
+    for (Table table : tables) {
+      for (String name : names) {
+        if (table.getName().equalsIgnoreCase(name)) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  }
+
+  public static Set<Table> getTableSetWithNames(Set<Table> tables, String[] names) {
+    Set<Table> tableSet = new HashSet<>();
+    for (Table table : tables) {
+      for (String name : names) {
+        if (table.getName().equalsIgnoreCase(name)) {
+          tableSet.add(table);
+          break;
+        }
+      }
+    }
+    return tableSet;
+  }
+
   public static Column findColumnById(Collection<Column> columns, SqlIdentifier id) {
     String colName = id.names.get(id.names.size() - 1);
     for (Column column : columns) {
       if (column.getName().equalsIgnoreCase(colName)) {
         return column;
+      }
+    }
+    return null;
+  }
+
+  public static AliasedTable findAliasedTableByAlias(Set<AliasedTable> tables, String alias) {
+    if (!alias.isEmpty()) {
+      for (AliasedTable table : tables) {
+        if (table.getAlias() != null) {
+          if (table.getAlias().equalsIgnoreCase(alias)) {
+            return table;
+          }
+        } else {
+          if (table.getTable().getName().equalsIgnoreCase(alias)) {
+            return table;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  public static AliasedTable findAliasedTableContainingColumn(
+      Set<AliasedTable> tables, SqlIdentifier col) {
+    String colName = col.names.get(col.names.size() - 1);
+    String alias = Utils.getTableAlias(col);
+
+    AliasedTable tableWithAlias = null;
+    for (AliasedTable table : tables) {
+      if (table.getAlias() != null && table.getAlias().equalsIgnoreCase(alias)) {
+        tableWithAlias = table;
+        break;
+      }
+    }
+
+    if (tableWithAlias != null) {
+      for (Column column : tableWithAlias.getTable().getColumns()) {
+        if (column.getName().equalsIgnoreCase(colName)) {
+          return tableWithAlias;
+        }
+      }
+    } else {
+      for (AliasedTable table : tables) {
+        for (Column column : table.getTable().getColumns()) {
+          if (column.getName().equalsIgnoreCase(colName)) {
+            return table;
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  public static Table findTableContainingColumn(Set<Table> tables, SqlIdentifier col) {
+    String colName = col.names.get(col.names.size() - 1);
+    for (Table table : tables) {
+      for (Column column : table.getColumns()) {
+        if (column.getName().equalsIgnoreCase(colName)) {
+          return table;
+        }
       }
     }
     return null;
@@ -267,5 +362,9 @@ public class Utils {
 
   public static EqualPredicate buildEqualPredicate(Column col, Double val) {
     return new EqualPredicate(col, val);
+  }
+
+  public static RangePredicate buildRangePredicate(Column col, Double val1, Double val2) {
+    return new RangePredicate(col, val1, val2, false, false);
   }
 }

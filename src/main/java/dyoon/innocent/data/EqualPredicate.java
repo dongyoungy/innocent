@@ -10,12 +10,31 @@ public class EqualPredicate extends Predicate {
   }
 
   @Override
+  public int hashCode() {
+    return column.hashCode() + Double.hashCode(value);
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (obj instanceof EqualPredicate) {
+      EqualPredicate eq = (EqualPredicate) obj;
+      return eq.column.equals(column) && eq.value == value;
+    }
+    return false;
+  }
+
+  @Override
   public String toString() {
     return column.getName() + " == " + value;
   }
 
   public Column getColumn() {
     return column;
+  }
+
+  @Override
+  public String toSql() {
+    return String.format("%s = %f", column.getName(), value);
   }
 
   public void setColumn(Column column) {

@@ -2,11 +2,15 @@ package dyoon.innocent;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.Sets;
 import com.google.common.math.Stats;
 import dyoon.innocent.data.Column;
+import dyoon.innocent.data.FactDimensionJoin;
 import dyoon.innocent.data.Join;
+import dyoon.innocent.data.PartitionCandidate;
 import dyoon.innocent.data.PartitionSpace;
 import dyoon.innocent.data.Predicate;
+import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
 import dyoon.innocent.database.Database;
 import dyoon.innocent.database.DatabaseImpl;
@@ -55,9 +59,17 @@ public class InnocentEngine {
   private Map<String, Double> origRunTimeCache;
 
   // for partition analysis
+  private Set<Table> factTableSet;
+  private Set<Table> ignoreFactTableSet;
+  private Set<Query> allQueries;
   private Set<Table> allTables;
   private List<Column> allColumns;
+  private Set<PartitionCandidate> partitionCandidates;
+  private Set<Prejoin> prejoinSet;
   private com.google.common.collect.Table<Table, Column, PartitionSpace> partitionSpaceTable;
+  private Map<Column, Integer> predicateColumnFreqTable;
+
+  private Set<FactDimensionJoin> factDimensionJoinSet;
 
   public InnocentEngine(DatabaseImpl database, Args args, String timestamp) {
     this.database = database;
@@ -66,9 +78,15 @@ public class InnocentEngine {
     this.origRunTimeCache = new HashMap<>();
     this.args = args;
 
+    this.allQueries = new HashSet<>();
     this.allTables = new HashSet<>();
     this.allColumns = new ArrayList<>();
+    this.partitionCandidates = new HashSet<>();
     this.partitionSpaceTable = HashBasedTable.create();
+    this.prejoinSet = new HashSet<>();
+    this.predicateColumnFreqTable = new HashMap<>();
+
+    this.factDimensionJoinSet = new HashSet<>();
   }
 
   public InnocentEngine() {
@@ -76,6 +94,14 @@ public class InnocentEngine {
     this.isSampleUsed = false;
     this.timeCreated = "";
     this.origRunTimeCache = new HashMap<>();
+    this.prejoinSet = new HashSet<>();
+    this.predicateColumnFreqTable = new HashMap<>();
+    this.partitionCandidates = new HashSet<>();
+
+    this.allQueries = new HashSet<>();
+    this.allTables = new HashSet<>();
+    this.allColumns = new ArrayList<>();
+    this.factDimensionJoinSet = new HashSet<>();
   }
 
   public boolean isSampleUsed() {
@@ -91,6 +117,185 @@ public class InnocentEngine {
     return node.accept(visitor);
   }
 
+  public void buildPrejoins() throws SQLException {
+    String targetDatabase = args.getDatabaseForInnocent();
+    Set<FactDimensionJoin> joinWithPredicateSet = new HashSet<>();
+    for (FactDimensionJoin factDimensionJoin : factDimensionJoinSet) {
+      if (!factDimensionJoin.getPredicates().isEmpty()) {
+        joinWithPredicateSet.add(factDimensionJoin);
+      }
+    }
+    Set<Table> factTablesToConsider = new HashSet<>(this.factTableSet);
+    factTablesToConsider.removeAll(this.ignoreFactTableSet);
+
+    Set<Prejoin> prejoinsToBuild = new HashSet<>();
+    for (FactDimensionJoin join : joinWithPredicateSet) {
+      if (factTablesToConsider.contains(join.getFactTable())) {
+        Prejoin prejoinToAddJoin = this.findExisitingPrejoinForJoin(prejoinsToBuild, join);
+        if (prejoinToAddJoin != null) {
+          prejoinToAddJoin.addJoin(join);
+        } else {
+          Prejoin newPrejoin = new Prejoin(join.getFactTable());
+          newPrejoin.addJoin(join);
+          prejoinsToBuild.add(newPrejoin);
+        }
+      }
+    }
+
+    System.out.println();
+  }
+
+  private Prejoin findExisitingPrejoinForJoin(Set<Prejoin> prejoins, FactDimensionJoin join) {
+    Prejoin prejoinFound = null;
+
+    for (Prejoin prejoin : prejoins) {
+      if (prejoin.getJoinSet().contains(join)) {
+        prejoinFound = prejoin;
+        break;
+      } else if (!prejoin.containDimension(join)) {
+        prejoinFound = prejoin;
+        break;
+      }
+    }
+
+    return prejoinFound;
+  }
+
+  public void createPartitionCandidates() throws SQLException {
+    // get all predicate columns
+    Set<Column> predColumnSet = new HashSet<>();
+    for (Prejoin prejoin : prejoinSet) {
+      for (Query q : prejoin.getQueries()) {
+        for (Predicate p : q.getPredicates()) {
+          predColumnSet.add(p.getColumn());
+        }
+      }
+    }
+
+    // get num distinct values for each pred column
+    for (Column column : predColumnSet) {
+      column.calculateNumDistinctValue(this.database);
+    }
+
+    // Assume fact table is 'store_sales' for now.
+    Table factTable = Utils.findTableByName(allTables, "store_sales");
+    Set<Set<Column>> predColumnPowerSet = Sets.powerSet(predColumnSet);
+
+    for (Set<Column> columnSet : predColumnPowerSet) {
+      PartitionCandidate candidate = new PartitionCandidate(factTable, columnSet);
+      partitionCandidates.add(candidate);
+    }
+
+    // gather stats for each candidate
+    for (PartitionCandidate candidate : partitionCandidates) {
+      candidate.calculateStats(this.database);
+    }
+  }
+
+  public void runQueryAnalysis(Query q)
+      throws ClassNotFoundException, SqlParseException, SQLException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
+    Logger.info("Analyzing query {}", q.getId());
+
+    if (this.allTables.isEmpty()) {
+      allTables = database.getAllTableAndColumns(args.getDatabase());
+      allColumns = Utils.getAllColumns(allTables);
+    }
+
+    SqlParser sqlParser = SqlParser.create(q.getQuery());
+    SqlNode node = sqlParser.parseQuery();
+    String[] factTables = args.getFactTables().split(",");
+    String[] ignoreFactTables = args.getIgnoreFactTables().split(",");
+    this.factTableSet = Utils.getTableSetWithNames(allTables, factTables);
+    this.ignoreFactTableSet = Utils.getTableSetWithNames(allTables, ignoreFactTables);
+
+    allQueries.add(q);
+
+    JoinAndPredicateFinder joinFinder =
+        new JoinAndPredicateFinder(q, allTables, allColumns, factTableSet, ignoreFactTableSet);
+    node.accept(joinFinder);
+    Set<FactDimensionJoin> joinSet = joinFinder.getFactDimensionJoinSet();
+    this.mergeFactDimensionJoin(joinSet);
+
+    //    Set<Join> joinSet = joinFinder.getJoinSet();
+    //
+    //    Map<Set<Table>, Set<Set<SqlIdentifier>>> joinMap = new HashMap<>();
+
+    //    // construct required prejoins
+    //    for (Join join : joinSet) {
+    //      Set<Set<SqlIdentifier>> joinKeySets = join.getJoinKeys();
+    //      for (Set<SqlIdentifier> joinKeySet : joinKeySets) {
+    //        Set<Table> joinTables = new HashSet<>();
+    //        // joinKeySet should contain two columns
+    //        for (SqlIdentifier column : joinKeySet) {
+    //          Table table = Utils.findTableContainingColumn(allTables, column);
+    //          if (table == null) {
+    //            Logger.error("No table found containing {}", column.getSimple());
+    //            return;
+    //          }
+    //          joinTables.add(table);
+    //        }
+    //
+    //        // check join tables contains our target fact tables +
+    //        // should not contain tables that we want to ignore
+    //        // this logic should change later to take account for individual fact tables
+    //        int numFactTable = Utils.containsTableAny(joinTables, factTables);
+    //        int numIgnoreFactTable = Utils.containsTableAny(joinTables, ignoreFactTables);
+    //
+    //        if (numFactTable == 1 && numIgnoreFactTable == 0) {
+    //          if (!joinMap.containsKey(joinTables)) {
+    //            joinMap.put(joinTables, new HashSet<>());
+    //          }
+    //          Set<Set<SqlIdentifier>> joinKeys = joinMap.get(joinTables);
+    //          joinKeys.add(joinKeySet);
+    //        }
+    //      }
+    //    }
+    //
+    //    for (Map.Entry<Set<Table>, Set<Set<SqlIdentifier>>> entry : joinMap.entrySet()) {
+    //      Set<Set<String>> joinKeyStringSet = convertToString(entry.getValue());
+    //      Prejoin newPrejoin = new Prejoin(entry.getKey(), joinKeyStringSet);
+    //      newPrejoin.addQuery(q);
+    //      prejoinSet.add(newPrejoin);
+    //    }
+    //
+    //    for (Predicate predicate : q.getPredicates()) {
+    //      Column column = predicate.getColumn();
+    //      if (!predicateColumnFreqTable.containsKey(column)) {
+    //        predicateColumnFreqTable.put(column, 1);
+    //      } else {
+    //        int freq = predicateColumnFreqTable.get(column);
+    //        predicateColumnFreqTable.put(column, freq + 1);
+    //      }
+    //    }
+  }
+
+  private void mergeFactDimensionJoin(Set<FactDimensionJoin> joinSet) {
+    for (FactDimensionJoin join : joinSet) {
+      if (factDimensionJoinSet.contains(join)) {
+        for (FactDimensionJoin factDimensionJoin : factDimensionJoinSet) {
+          if (factDimensionJoin.equals(join)) {
+            factDimensionJoin.addPredicateAll(join.getPredicates());
+          }
+        }
+      } else {
+        factDimensionJoinSet.add(join);
+      }
+    }
+  }
+
+  private Set<Set<String>> convertToString(Set<Set<SqlIdentifier>> value) {
+    Set<Set<String>> stringSet = new HashSet<>();
+    for (Set<SqlIdentifier> set : value) {
+      Set<String> newSet = new HashSet<>();
+      for (SqlIdentifier id : set) {
+        newSet.add(id.names.get(id.names.size() - 1));
+      }
+      stringSet.add(newSet);
+    }
+    return stringSet;
+  }
+
   public void runPartitionAnalysis(Query q)
       throws ClassNotFoundException, SqlParseException, SQLException {
     Class.forName("org.apache.calcite.jdbc.Driver");
@@ -103,7 +308,7 @@ public class InnocentEngine {
       allColumns = Utils.getAllColumns(allTables);
     }
 
-    JoinAndPredicateFinder joinFinder = new JoinAndPredicateFinder(allTables, allColumns);
+    JoinAndPredicateFinder joinFinder = new JoinAndPredicateFinder(q, allTables, allColumns);
     node.accept(joinFinder);
 
     Set<Join> joinSet = joinFinder.getJoinSet();
@@ -129,15 +334,33 @@ public class InnocentEngine {
     Logger.debug("Partition analysis done for query {}", q.getId());
   }
 
-  public void findBestColumnsForPartition() {
-    List<PartitionSpace> partitionSpaces = new ArrayList<>();
-    for (com.google.common.collect.Table.Cell<Table, Column, PartitionSpace> cell :
-        partitionSpaceTable.cellSet()) {
-      PartitionSpace ps = cell.getValue();
-      partitionSpaces.add(ps);
+  public void buildPartitions() {
+    for (PartitionSpace space : partitionSpaceTable.values()) {
+      space.createPartitions();
     }
-    int k = 5;
-    ILPSolver.solveForBestColumnForPartition(partitionSpaces, k);
+  }
+
+  public void findBestColumnsForPartition(int k) {
+    Map<Table, List<PartitionSpace>> tableToPartitionSpace = new HashMap<>();
+    for (Table table : partitionSpaceTable.rowKeySet()) {
+      List<PartitionSpace> partitionSpaces = new ArrayList<>();
+      for (PartitionSpace ps : partitionSpaceTable.row(table).values()) {
+        partitionSpaces.add(ps);
+      }
+      while (k > 0) {
+        List<PartitionSpace> bestPartitionSpaces =
+            ILPSolver.solveForBestColumnForPartition(partitionSpaces, k);
+        if (!tableToPartitionSpace.containsKey(table)) {
+          tableToPartitionSpace.put(table, new ArrayList<>());
+        }
+        List<PartitionSpace> list = tableToPartitionSpace.get(table);
+        list.addAll(bestPartitionSpaces);
+        partitionSpaces.removeAll(bestPartitionSpaces);
+        k -= bestPartitionSpaces.size();
+        // if all queries are covered by less than k columns,
+        // repeat to have extra columns for partitions
+      }
+    }
     Logger.debug("Found best columns for partitioning");
   }
 

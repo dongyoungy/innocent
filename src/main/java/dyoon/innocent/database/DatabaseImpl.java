@@ -4,6 +4,7 @@ import dyoon.innocent.AQPInfo;
 import dyoon.innocent.Args;
 import dyoon.innocent.Query;
 import dyoon.innocent.Sample;
+import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
 
 import java.sql.ResultSet;
@@ -32,6 +33,8 @@ public interface DatabaseImpl {
   void createStratifiedSample(String database, Sample s) throws SQLException;
 
   void createDatabaseIfNotExists(String database) throws SQLException;
+
+  void constructPrejoin(String database, Prejoin p) throws SQLException;
 
   long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException;
 

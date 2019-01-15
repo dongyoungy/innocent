@@ -24,6 +24,28 @@ public class RangePredicate extends Predicate {
   }
 
   @Override
+  public int hashCode() {
+    return column.hashCode()
+        + Double.hashCode(lowerBound)
+        + Double.hashCode(upperBound)
+        + Boolean.hashCode(isLowerInclusive)
+        + Boolean.hashCode(isUpperInclusive);
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (obj instanceof RangePredicate) {
+      RangePredicate range = (RangePredicate) obj;
+      return range.column.equals(column)
+          && range.lowerBound == lowerBound
+          && range.upperBound == upperBound
+          && range.isLowerInclusive == isLowerInclusive
+          && range.isUpperInclusive == isUpperInclusive;
+    }
+    return false;
+  }
+
+  @Override
   public String toString() {
     String str = "";
     if (this.lowerBound != Double.NEGATIVE_INFINITY) {
@@ -40,6 +62,25 @@ public class RangePredicate extends Predicate {
 
   public Column getColumn() {
     return column;
+  }
+
+  @Override
+  public String toSql() {
+    String sql = "";
+    if (this.lowerBound != Double.NEGATIVE_INFINITY) {
+      sql += column.getName();
+      sql += (this.isLowerInclusive) ? " >= " : " > ";
+      sql += this.lowerBound;
+    }
+    if (this.upperBound != Double.POSITIVE_INFINITY) {
+      if (!sql.isEmpty()) {
+        sql += " AND ";
+      }
+      sql += column.getName();
+      sql += (this.isUpperInclusive) ? " <= " : " < ";
+      sql += this.upperBound;
+    }
+    return sql;
   }
 
   public double getLowerBound() {
