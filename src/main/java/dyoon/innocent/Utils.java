@@ -6,6 +6,7 @@ import dyoon.innocent.data.EqualPredicate;
 import dyoon.innocent.data.Predicate;
 import dyoon.innocent.data.RangePredicate;
 import dyoon.innocent.data.Table;
+import dyoon.innocent.data.UnorderedPair;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlIdentifier;
@@ -272,6 +273,18 @@ public class Utils {
     }
 
     return null;
+  }
+
+  public static Set<UnorderedPair<Column>> getColumnPairs(
+      Collection<Column> allColumns, Set<UnorderedPair<SqlIdentifier>> pairSet) {
+    Set<UnorderedPair<Column>> columnSet = new HashSet<>();
+    for (UnorderedPair<SqlIdentifier> pair : pairSet) {
+      Column leftColumn = Utils.findColumnById(allColumns, pair.getLeft());
+      Column rightColumn = Utils.findColumnById(allColumns, pair.getRight());
+
+      columnSet.add(new UnorderedPair<>(leftColumn, rightColumn));
+    }
+    return columnSet;
   }
 
   public static Table findTableContainingColumn(Set<Table> tables, SqlIdentifier col) {

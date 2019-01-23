@@ -3,7 +3,10 @@ package dyoon.innocent.database;
 import dyoon.innocent.AQPInfo;
 import dyoon.innocent.Args;
 import dyoon.innocent.Query;
-import dyoon.innocent.Sample;
+import dyoon.innocent.StratifiedSample;
+import dyoon.innocent.UniformSample;
+import dyoon.innocent.data.Column;
+import dyoon.innocent.data.PartitionCandidate;
 import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
 
@@ -27,28 +30,44 @@ public interface DatabaseImpl {
 
   boolean checkTableExists(String database, String table) throws SQLException;
 
-  void createStratifiedSample(String targetDatabase, String sourceDatabase, Sample s)
+  void createStratifiedSample(String targetDatabase, String sourceDatabase, StratifiedSample s)
       throws SQLException;
 
-  void createStratifiedSample(String database, Sample s) throws SQLException;
+  void createStratifiedSample(String database, StratifiedSample s) throws SQLException;
+
+  void createUniformSample(String targetDatabase, String sourceDatabase, UniformSample s)
+      throws SQLException;
 
   void createDatabaseIfNotExists(String database) throws SQLException;
 
-  void constructPrejoin(String database, Prejoin p) throws SQLException;
+  void constructPrejoinWithUniformSample(
+      String targetDatabase, String sourceDatabase, Prejoin p, double ratio) throws SQLException;
+
+  void buildPartitionTable(PartitionCandidate candidate) throws SQLException;
 
   long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException;
+
+  long getTableSize(Table table) throws SQLException;
+
+  long calculateNumDistinct(Column column) throws SQLException;
 
   double runQueryAndSaveResult(Query q, Args args) throws SQLException;
 
   double runQueryWithSampleAndSaveResult(AQPInfo aqp, Args args) throws SQLException;
 
-  ResultSet executeQuery(String sql) throws SQLException;
+  ResultSet executeQuery(String sql);
 
-  boolean execute(String sql) throws SQLException;
+  boolean execute(String sql);
 
   void clearCache(String script);
 
   String getCatalog() throws SQLException;
 
+  String getRandomFunction();
+
   Set<Table> getAllTableAndColumns(String database) throws SQLException;
+
+  String getCurrentTimestamp();
+
+  void calculateStatsForPartitionCandidate(PartitionCandidate candidate) throws SQLException;
 }

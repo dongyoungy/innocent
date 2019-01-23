@@ -1,6 +1,6 @@
 package dyoon.innocent.query;
 
-import dyoon.innocent.Sample;
+import dyoon.innocent.StratifiedSample;
 import dyoon.innocent.Utils;
 import org.apache.calcite.sql.JoinConditionType;
 import org.apache.calcite.sql.JoinType;
@@ -48,7 +48,7 @@ public class QueryTransformer extends SqlShuttle {
   int errCount;
   int tmpCount;
   private boolean isWithError;
-  private Sample s;
+  private StratifiedSample s;
   private SqlIdentifier currentAggAlias;
   private SqlOperator currentAggOp;
   private String sampleDatabase;
@@ -61,7 +61,10 @@ public class QueryTransformer extends SqlShuttle {
   private Set<SqlNodeList> transformedSelectListSet;
 
   public QueryTransformer(
-      Sample s, String sampleDatabase, List<String> sampleTableColumns, boolean isWithError) {
+      StratifiedSample s,
+      String sampleDatabase,
+      List<String> sampleTableColumns,
+      boolean isWithError) {
     this.approxCount = 0;
     this.sumCount = 0;
     this.avgCount = 0;
@@ -132,7 +135,7 @@ public class QueryTransformer extends SqlShuttle {
     checker.visit(select.getSelectList());
 
     TableSubstitutor substitutor = new TableSubstitutor(sampleDatabase);
-    substitutor.addTableToSample(s.getTable(), s);
+    substitutor.addTableToSample(s.getTable().getName(), s);
     select = substitutor.substitute(select);
 
     int numSubs = substitutor.getNumTableSubstitutions();
@@ -148,7 +151,7 @@ public class QueryTransformer extends SqlShuttle {
       String statTable = s.getSampleTableName() + "___stat";
       SqlIdentifier sampleAlias = substitutor.getSampleAlias(s);
       if (sampleAlias == null) {
-        sampleAlias = new SqlIdentifier(s.getTable(), SqlParserPos.ZERO);
+        sampleAlias = new SqlIdentifier(s.getTable().getName(), SqlParserPos.ZERO);
       }
       SqlIdentifier statAlias = new SqlIdentifier("stat", SqlParserPos.ZERO);
 
@@ -434,7 +437,7 @@ public class QueryTransformer extends SqlShuttle {
       // add sample column set to select list + group by of inner query.
       for (String groupBy : s.getColumnSet()) {
         SqlIdentifier newGroupBy =
-            new SqlIdentifier(Arrays.asList(s.getTable(), groupBy), SqlParserPos.ZERO);
+            new SqlIdentifier(Arrays.asList(s.getTable().getName(), groupBy), SqlParserPos.ZERO);
         innerSelect.getSelectList().add(newGroupBy);
         SqlNodeList group = innerSelect.getGroup();
         if (group == null) {

@@ -100,9 +100,14 @@ public class JoinAndPredicateFinder extends SqlShuttle {
         select.getWhere().accept(pe);
       }
 
+      query.addTableAll(tables);
+
       Map<AliasedTable, Set<Predicate>> predicates = pe.getPredicateMap();
       Set<UnorderedPair<SqlIdentifier>> joinKeyPairSet = extractor.getJoinKeySet();
       joinKeyPairSet.addAll(extractor.getJoinKeySet());
+
+      // add predicates to query
+      //      query.addPredicateAll(predicates);
 
       com.google.common.collect.Table<AliasedTable, AliasedTable, Set<UnorderedPair<SqlIdentifier>>>
           joinTable = HashBasedTable.create();
@@ -150,14 +155,21 @@ public class JoinAndPredicateFinder extends SqlShuttle {
         AliasedTable factTable = cell.getRowKey();
         AliasedTable dimTable = cell.getColumnKey();
         Set<UnorderedPair<SqlIdentifier>> joinKeyPairs = cell.getValue();
+        Set<UnorderedPair<Column>> joinColumnPairs = Utils.getColumnPairs(allColumns, joinKeyPairs);
 
         FactDimensionJoin newFactDimJoin =
             FactDimensionJoin.create(factTable, dimTable, joinKeyPairs, allColumns);
         if (predicates.get(factTable) != null) {
-          newFactDimJoin.addPredicateAll(predicates.get(factTable));
+          Set<Predicate> predicateSet = predicates.get(factTable);
+          newFactDimJoin.addPredicateAll(predicateSet);
+          query.addPredicateAll(
+              factTable.getTable(), dimTable.getTable(), joinColumnPairs, predicateSet);
         }
         if (predicates.get(dimTable) != null) {
-          newFactDimJoin.addPredicateAll(predicates.get(dimTable));
+          Set<Predicate> predicateSet = predicates.get(dimTable);
+          newFactDimJoin.addPredicateAll(predicateSet);
+          query.addPredicateAll(
+              factTable.getTable(), dimTable.getTable(), joinColumnPairs, predicateSet);
         }
         factDimensionJoinSet.add(newFactDimJoin);
       }

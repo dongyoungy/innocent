@@ -9,9 +9,16 @@ public class UnorderedPair<T> {
   private T left;
   private T right;
 
+  public UnorderedPair() {}
+
   public UnorderedPair(T left, T right) {
     this.left = left;
     this.right = right;
+  }
+
+  @Override
+  public String toString() {
+    return left.toString() + " : " + right.toString();
   }
 
   @Override

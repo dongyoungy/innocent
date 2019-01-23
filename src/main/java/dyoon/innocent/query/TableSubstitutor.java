@@ -1,6 +1,6 @@
 package dyoon.innocent.query;
 
-import dyoon.innocent.Sample;
+import dyoon.innocent.StratifiedSample;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlCall;
@@ -26,7 +26,7 @@ public class TableSubstitutor extends SqlShuttle {
   private int numTableSubstitutions;
 
   private Set<SqlIdentifier> tableSet;
-  private Map<String, Sample> tableToSampleMap;
+  private Map<String, StratifiedSample> tableToSampleMap;
   private Map<SqlIdentifier, SqlIdentifier> aliasMap;
   private String sampleDatabase;
 
@@ -41,8 +41,8 @@ public class TableSubstitutor extends SqlShuttle {
     return numTableSubstitutions;
   }
 
-  public void addTableToSample(String table, Sample sample) {
-    tableToSampleMap.put(table, sample);
+  public void addTableToSample(String table, StratifiedSample stratifiedSample) {
+    tableToSampleMap.put(table, stratifiedSample);
   }
 
   private SqlNode addTable(SqlIdentifier id) {
@@ -52,7 +52,7 @@ public class TableSubstitutor extends SqlShuttle {
   }
 
   private SqlNode substituteTable(SqlIdentifier id) {
-    for (Map.Entry<String, Sample> entry : this.tableToSampleMap.entrySet()) {
+    for (Map.Entry<String, StratifiedSample> entry : this.tableToSampleMap.entrySet()) {
       for (int i = 0; i < id.names.size(); ++i) {
         if (id.names.get(i).equalsIgnoreCase(entry.getKey())) {
           ++numTableSubstitutions;
@@ -74,15 +74,15 @@ public class TableSubstitutor extends SqlShuttle {
     return null;
   }
 
-  public SqlIdentifier getSampleAlias(Sample s) {
+  public SqlIdentifier getSampleAlias(StratifiedSample s) {
     for (Map.Entry<SqlIdentifier, SqlIdentifier> entry : aliasMap.entrySet()) {
       SqlIdentifier key = entry.getKey();
       // This check needs to be revised later.
-      if (key.toString().toLowerCase().contains(s.getTable().toLowerCase())) {
+      if (key.toString().toLowerCase().contains(s.getTable().getName().toLowerCase())) {
         return entry.getValue();
       }
     }
-    return new SqlIdentifier(s.getTable(), SqlParserPos.ZERO);
+    return new SqlIdentifier(s.getTable().getName(), SqlParserPos.ZERO);
   }
 
   public SqlSelect substitute(SqlSelect call) {
@@ -138,11 +138,11 @@ public class TableSubstitutor extends SqlShuttle {
   public SqlNode visit(SqlIdentifier id) {
     if (id.names.size() == 1) {
       String name = id.names.get(0);
-      for (Sample sample : tableToSampleMap.values()) {
-        for (String sampleColumn : sample.getColumnSet()) {
+      for (StratifiedSample stratifiedSample : tableToSampleMap.values()) {
+        for (String sampleColumn : stratifiedSample.getColumnSet()) {
           if (sampleColumn.equalsIgnoreCase(name)) {
             List<String> newNames = new ArrayList<>();
-            newNames.add(this.getSampleAlias(sample).toString());
+            newNames.add(this.getSampleAlias(stratifiedSample).toString());
             newNames.add(name);
             id.setNames(newNames, new ArrayList<>());
           }

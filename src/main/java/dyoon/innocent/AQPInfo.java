@@ -12,7 +12,7 @@ import java.util.List;
 public class AQPInfo {
 
   private Query q;
-  private Sample s;
+  private StratifiedSample s;
   private List<Pair<Integer, List<SqlNode>>> expressionList;
   private List<ColumnType> columnTypeList;
   private List<SqlSelect> errorQueries;
@@ -21,7 +21,7 @@ public class AQPInfo {
 
   public AQPInfo(
       Query q,
-      Sample s,
+      StratifiedSample s,
       List<Pair<Integer, List<SqlNode>>> expressionList,
       List<Pair<SqlIdentifier, SqlIdentifier>> aggToErrorList,
       SqlNode aqpNode) {
@@ -52,7 +52,7 @@ public class AQPInfo {
     return q;
   }
 
-  public Sample getSample() {
+  public StratifiedSample getSample() {
     return s;
   }
 

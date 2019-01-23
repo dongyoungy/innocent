@@ -4,6 +4,7 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Sets;
 import com.google.common.math.Stats;
+import dyoon.innocent.data.AliasedTable;
 import dyoon.innocent.data.Column;
 import dyoon.innocent.data.FactDimensionJoin;
 import dyoon.innocent.data.Join;
@@ -12,6 +13,7 @@ import dyoon.innocent.data.PartitionSpace;
 import dyoon.innocent.data.Predicate;
 import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
+import dyoon.innocent.data.UnorderedPair;
 import dyoon.innocent.database.Database;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.lp.ILPSolver;
@@ -33,6 +35,7 @@ import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.commons.lang3.tuple.Pair;
+import org.checkerframework.checker.nullness.compatqual.NullableDecl;
 import org.pmw.tinylog.Logger;
 
 import java.io.File;
@@ -48,9 +51,29 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /** Created by Dong Young Yoon on 10/19/18. */
 public class InnocentEngine {
+
+  class MaxPartitionPredicate implements com.google.common.base.Predicate<Set<Column>> {
+
+    private long maxPartitionPerTable;
+
+    public MaxPartitionPredicate(long maxPartitionPerTable) {
+      this.maxPartitionPerTable = maxPartitionPerTable;
+    }
+
+    @Override
+    public boolean apply(@NullableDecl Set<Column> columns) {
+      long val = 1;
+      for (Column column : columns) {
+        val *= column.getNumDistinctValues();
+      }
+      return !columns.isEmpty() && (val < this.maxPartitionPerTable);
+    }
+  }
 
   private Args args;
   private String timeCreated;
@@ -59,9 +82,10 @@ public class InnocentEngine {
   private Map<String, Double> origRunTimeCache;
 
   // for partition analysis
+  private static final double DEFAULT_PREJOIN_UNIFORM_RATIO = 0.01;
   private Set<Table> factTableSet;
   private Set<Table> ignoreFactTableSet;
-  private Set<Query> allQueries;
+  private SortedSet<Query> allQueries;
   private Set<Table> allTables;
   private List<Column> allColumns;
   private Set<PartitionCandidate> partitionCandidates;
@@ -78,7 +102,7 @@ public class InnocentEngine {
     this.origRunTimeCache = new HashMap<>();
     this.args = args;
 
-    this.allQueries = new HashSet<>();
+    this.allQueries = new TreeSet<>();
     this.allTables = new HashSet<>();
     this.allColumns = new ArrayList<>();
     this.partitionCandidates = new HashSet<>();
@@ -98,7 +122,7 @@ public class InnocentEngine {
     this.predicateColumnFreqTable = new HashMap<>();
     this.partitionCandidates = new HashSet<>();
 
-    this.allQueries = new HashSet<>();
+    this.allQueries = new TreeSet<>();
     this.allTables = new HashSet<>();
     this.allColumns = new ArrayList<>();
     this.factDimensionJoinSet = new HashSet<>();
@@ -117,8 +141,9 @@ public class InnocentEngine {
     return node.accept(visitor);
   }
 
-  public void buildPrejoins() throws SQLException {
+  public Set<Prejoin> buildPrejoins() throws SQLException {
     String targetDatabase = args.getDatabaseForInnocent();
+    String sourceDatabase = args.getDatabase();
     Set<FactDimensionJoin> joinWithPredicateSet = new HashSet<>();
     for (FactDimensionJoin factDimensionJoin : factDimensionJoinSet) {
       if (!factDimensionJoin.getPredicates().isEmpty()) {
@@ -142,54 +167,201 @@ public class InnocentEngine {
       }
     }
 
-    System.out.println();
+    // build prejoin with fact table sample
+    for (Prejoin prejoin : prejoinsToBuild) {
+      database.constructPrejoinWithUniformSample(
+          targetDatabase, sourceDatabase, prejoin, DEFAULT_PREJOIN_UNIFORM_RATIO);
+    }
+
+    return prejoinsToBuild;
   }
 
   private Prejoin findExisitingPrejoinForJoin(Set<Prejoin> prejoins, FactDimensionJoin join) {
     Prejoin prejoinFound = null;
 
     for (Prejoin prejoin : prejoins) {
-      if (prejoin.getJoinSet().contains(join)) {
-        prejoinFound = prejoin;
-        break;
-      } else if (!prejoin.containDimension(join)) {
-        prejoinFound = prejoin;
-        break;
+      if (prejoin.getFactTable().equals(join.getFactTable())) {
+        if (prejoin.getJoinSet().contains(join)) {
+          prejoinFound = prejoin;
+          break;
+        } else if (!prejoin.containDimension(join)) {
+          prejoinFound = prejoin;
+          break;
+        }
       }
     }
 
     return prejoinFound;
   }
 
-  public void createPartitionCandidates() throws SQLException {
-    // get all predicate columns
-    Set<Column> predColumnSet = new HashSet<>();
-    for (Prejoin prejoin : prejoinSet) {
-      for (Query q : prejoin.getQueries()) {
-        for (Predicate p : q.getPredicates()) {
-          predColumnSet.add(p.getColumn());
+  public Set<PartitionCandidate> createPartitionCandidates(
+      Set<Prejoin> prejoins, int maxPartitionsPerTable) throws SQLException {
+
+    Set<PartitionCandidate> candidates = new HashSet<>();
+
+    // build partition candidates from each prejoin
+    for (Prejoin prejoin : prejoins) {
+      // get all predicate columns
+      Set<Column> predColumnSet = new HashSet<>();
+      for (FactDimensionJoin join : prejoin.getJoinSet()) {
+        for (Predicate predicate : join.getPredicates()) {
+          Column column = predicate.getColumn();
+          predColumnSet.add(column);
         }
+      }
+
+      for (Column column : predColumnSet) {
+        this.database.calculateNumDistinct(column);
+      }
+
+      //      // get num distinct values for each predicate column
+      //      // build a map {table -> column}
+      //      Map<String, Set<Column>> tableToColumnSetMap = new HashMap<>();
+      //      for (Column column : predColumnSet) {
+      //        this.database.calculateNumDistinct(column);
+      //        if (!tableToColumnSetMap.containsKey(column.getTable())) {
+      //          tableToColumnSetMap.put(column.getTable(), new HashSet<>());
+      //        }
+      //        tableToColumnSetMap.get(column.getTable()).add(column);
+      //      }
+
+      //      Set<Set<Column>> possibleColumnSets = new HashSet<>();
+      //      // for columns in each dimension table, calculate possible column sets
+      //      for (Set<Column> columnSet : tableToColumnSetMap.values()) {
+      //        // get powerset first
+      //        Set<Set<Column>> columnPowerSet = Sets.powerSet(columnSet);
+      //
+      //        // filter ones that have too many partitions
+      //        MaxPartitionPredicate maxPartitionPredicate =
+      //            new MaxPartitionPredicate(maxPartitionsPerTable);
+      //        Set<Set<Column>> filteredSets = Sets.filter(columnPowerSet, maxPartitionPredicate);
+      //        possibleColumnSets.addAll(filteredSets);
+      //      }
+      //
+      //      // generate candidates
+      //      for (Set<Column> columnSet : possibleColumnSets) {
+      //        PartitionCandidate candidate = new PartitionCandidate(prejoin, columnSet);
+      //        this.database.calculateStatsForPartitionCandidate(candidate);
+      //        candidates.add(candidate);
+      //      }
+
+      Set<Set<Column>> columnPowerSet = Sets.powerSet(predColumnSet);
+
+      // filter ones that have too many partitions
+      MaxPartitionPredicate maxPartitionPredicate =
+          new MaxPartitionPredicate(maxPartitionsPerTable);
+      Set<Set<Column>> possibleColumnSets = Sets.filter(columnPowerSet, maxPartitionPredicate);
+
+      // generate candidates
+      for (Set<Column> columnSet : possibleColumnSets) {
+        PartitionCandidate candidate = new PartitionCandidate(prejoin, columnSet);
+        this.database.calculateStatsForPartitionCandidate(candidate);
+        candidates.add(candidate);
       }
     }
 
-    // get num distinct values for each pred column
-    for (Column column : predColumnSet) {
-      column.calculateNumDistinctValue(this.database);
-    }
+    return candidates;
+  }
 
-    // Assume fact table is 'store_sales' for now.
-    Table factTable = Utils.findTableByName(allTables, "store_sales");
-    Set<Set<Column>> predColumnPowerSet = Sets.powerSet(predColumnSet);
-
-    for (Set<Column> columnSet : predColumnPowerSet) {
-      PartitionCandidate candidate = new PartitionCandidate(factTable, columnSet);
-      partitionCandidates.add(candidate);
+  public void buildPartitions(Set<PartitionCandidate> candidates) throws SQLException {
+    for (PartitionCandidate candidate : candidates) {
+      this.database.buildPartitionTable(candidate);
     }
+  }
 
-    // gather stats for each candidate
-    for (PartitionCandidate candidate : partitionCandidates) {
-      candidate.calculateStats(this.database);
+  public Set<PartitionCandidate> findBestPartitionGreedy(
+      Set<PartitionCandidate> candidates, double targetIOBound, int size) throws SQLException {
+    Set<PartitionCandidate> bestPartitions = new HashSet<>();
+    Set<PartitionCandidate> candidatesToConsider = new HashSet<>(candidates);
+    SortedSet<Query> queriesToConsider = new TreeSet<>(this.allQueries);
+
+    Map<PartitionCandidate, Integer> candidateQuality = new HashMap<>();
+    Map<PartitionCandidate, Double> candidateTotalIOReduction = new HashMap<>();
+
+    while (bestPartitions.size() < size) {
+
+      for (PartitionCandidate candidate : candidatesToConsider) {
+        int numQueryWithTargetIOBound = 0;
+        double totalIOReduction = 0;
+        candidate.clearQueries();
+        for (Query query : queriesToConsider) {
+          Map<
+                  Table,
+                  com.google.common.collect.Table<
+                      Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
+              predicateTableMap = query.getPredicateTableMap();
+          Set<Column> usedColumnSet = findUsedColumnSet(candidate, predicateTableMap);
+          if (!usedColumnSet.isEmpty()) {
+            PartitionCandidate pcForThisQuery =
+                new PartitionCandidate(candidate.getPrejoin(), usedColumnSet);
+            database.calculateStatsForPartitionCandidate(pcForThisQuery);
+
+            long reducedQueryCost = 0;
+            long queryCost = 0;
+            for (AliasedTable table : query.getTables()) {
+              if (factTableSet.contains(table.getTable())) {
+                queryCost += this.database.getTableSize(table.getTable());
+                if (candidate.getPrejoin().getFactTable().equals(table.getTable())) {
+                  reducedQueryCost += pcForThisQuery.getMaxParitionSize();
+                } else {
+                  reducedQueryCost += this.database.getTableSize(table.getTable());
+                }
+              }
+            }
+            query.setCost(queryCost);
+
+            double reducedIO = (double) reducedQueryCost / (double) queryCost;
+            if (reducedIO < targetIOBound) {
+              ++numQueryWithTargetIOBound;
+              candidate.addQuery(query);
+            } else {
+              totalIOReduction += (1 - reducedIO);
+            }
+          }
+        }
+        candidate.setNumQueryMeetingIOBound(numQueryWithTargetIOBound);
+        candidate.setTotalIOReductionForOtherQueries(totalIOReduction);
+      }
+
+      List<PartitionCandidate> pcList = new ArrayList<>(candidatesToConsider);
+      // sort to find best candidate
+      pcList.sort(
+          (o1, o2) -> {
+            int comp1 = (o2.getNumQueryMeetingIOBound() - o1.getNumQueryMeetingIOBound()) * 100000;
+            if (comp1 != 0) {
+              return comp1;
+            } else {
+              return (int)
+                  ((o2.getTotalIOReductionForOtherQueries() * 100)
+                      - (o1.getTotalIOReductionForOtherQueries() * 100));
+            }
+          });
+
+      PartitionCandidate best = pcList.get(0);
+      bestPartitions.add(best);
+      candidatesToConsider.remove(best);
+      queriesToConsider.removeAll(best.getQueriesMeetingIOBounds());
     }
+    return bestPartitions;
+  }
+
+  private Set<Column> findUsedColumnSet(
+      PartitionCandidate candidate,
+      Map<Table, com.google.common.collect.Table<Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
+          predicateTableMap) {
+    Set<Column> usedColumns = new HashSet<>();
+    for (Table fact : predicateTableMap.keySet()) {
+      for (com.google.common.collect.Table.Cell<Table, Set<UnorderedPair<Column>>, Set<Predicate>>
+          cell : predicateTableMap.get(fact).cellSet()) {
+        Table dim = cell.getRowKey();
+        Set<UnorderedPair<Column>> joinColumns = cell.getColumnKey();
+        Set<Predicate> predicates = cell.getValue();
+
+        Set<Column> columns = candidate.findUsedColumns(fact, dim, joinColumns, predicates);
+        usedColumns.addAll(columns);
+      }
+    }
+    return usedColumns;
   }
 
   public void runQueryAnalysis(Query q)
@@ -364,18 +536,18 @@ public class InnocentEngine {
     Logger.debug("Found best columns for partitioning");
   }
 
-  public AQPInfo rewriteWithSample(Query q, Sample s)
+  public AQPInfo rewriteWithSample(Query q, StratifiedSample s)
       throws ClassNotFoundException, SQLException, SqlParseException {
     return this.rewriteWithSample(q, s, true, false);
   }
 
-  public AQPInfo rewriteWithSample(Query q, Sample s, boolean isWithError)
+  public AQPInfo rewriteWithSample(Query q, StratifiedSample s, boolean isWithError)
       throws ClassNotFoundException, SQLException, SqlParseException {
     return this.rewriteWithSample(q, s, isWithError, false);
   }
 
   public AQPInfo rewriteWithSample(
-      Query q, Sample s, boolean isWithError, boolean doErrorPropagation)
+      Query q, StratifiedSample s, boolean isWithError, boolean doErrorPropagation)
       throws SqlParseException, ClassNotFoundException, SQLException {
 
     this.isSampleUsed = false;
@@ -387,7 +559,7 @@ public class InnocentEngine {
     if (s != null) {
       List<String> sampleTableColumns =
           (database != null)
-              ? database.getColumns(s.getTable())
+              ? database.getColumns(s.getTable().getName())
               : Arrays.asList("c1", "c2", "c3", "c4"); // latter is for testing
       QueryTransformer transformer =
           new QueryTransformer(s, args.getDatabaseForInnocent(), sampleTableColumns, isWithError);

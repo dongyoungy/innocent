@@ -4,18 +4,22 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Stopwatch;
 import dyoon.innocent.AQPInfo;
 import dyoon.innocent.Args;
+import dyoon.innocent.InnocentMeta;
 import dyoon.innocent.Query;
-import dyoon.innocent.Sample;
+import dyoon.innocent.StratifiedSample;
+import dyoon.innocent.UniformSample;
 import dyoon.innocent.data.Column;
+import dyoon.innocent.data.FactDimensionJoin;
+import dyoon.innocent.data.PartitionCandidate;
 import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
+import dyoon.innocent.data.UnorderedPair;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlWith;
 import org.apache.calcite.sql.dialect.HiveSqlDialect;
 import org.pmw.tinylog.Logger;
 
-import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -26,24 +30,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /** Created by Dong Young Yoon on 10/23/18. */
 public class ImpalaDatabase extends Database implements DatabaseImpl {
 
   private Map<String, Object> cache = new HashMap<>();
+  private static final String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
 
-  public ImpalaDatabase(Connection conn) {
-    this.conn = conn;
-    this.cache = new HashMap<>();
-  }
-
-  public ImpalaDatabase(String host, String database, String user, String password) {
+  public ImpalaDatabase(
+      String host, String sourceDatabase, String innocentDatabase, String user, String password) {
     try {
       Class.forName("com.cloudera.impala.jdbc41.Driver");
-      String connString = String.format("jdbc:impala://%s/%s", host, database);
+      String connString = String.format("jdbc:impala://%s/%s", host, sourceDatabase);
       this.conn = DriverManager.getConnection(connString, user, password);
+      this.sourceDatabase = sourceDatabase;
+      this.innocentDatabase = innocentDatabase;
       this.cache = new HashMap<>();
+      this.meta = InnocentMeta.getInstance(innocentDatabase, this);
     } catch (ClassNotFoundException | SQLException e) {
       e.printStackTrace();
     }
@@ -57,6 +63,23 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       tables.add(rs.getString(1));
     }
     return tables;
+  }
+
+  @Override
+  public long getTableSize(Table table) throws SQLException {
+    String key = String.format("table size of %s.%s", this.sourceDatabase, table.getName());
+    if (cache.containsKey(key)) {
+      return (Long) cache.get(key);
+    }
+
+    String sql = String.format("SELECT COUNT(*) FROM %s.%s", this.sourceDatabase, table.getName());
+    ResultSet rs = this.executeQuery(sql);
+    long val = -1;
+    if (rs.next()) {
+      val = rs.getLong(1);
+      cache.put(key, val);
+    }
+    return val;
   }
 
   @Override
@@ -91,18 +114,107 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   }
 
   @Override
-  public void createStratifiedSample(String database, Sample s) throws SQLException {
+  public void buildPartitionTable(PartitionCandidate candidate) throws SQLException {
+    Prejoin prejoin = candidate.getPrejoin();
+    Set<Column> columnSet = candidate.getColumnSet();
+    Set<FactDimensionJoin> joinSet = prejoin.getJoinSet();
+    Table factTable = prejoin.getFactTable();
+
+    SortedSet<String> partitionColumnNames = new TreeSet<>();
+    Set<String> partitionColumnTypes = new HashSet<>();
+    Set<String> dimTables = new HashSet<>();
+    for (Column column : columnSet) {
+      partitionColumnNames.add(column.getName());
+      partitionColumnTypes.add(column.getType());
+      dimTables.add(column.getTable());
+    }
+    Set<UnorderedPair<Column>> joinColumnPairs = new HashSet<>();
+
+    for (FactDimensionJoin join : joinSet) {
+      if (dimTables.contains(join.getDimensionTable().getName())) {
+        joinColumnPairs.addAll(join.getJoinPairs());
+      }
+    }
+
+    String partitionedTableName =
+        String.format(
+            "%s___part___%s___%d",
+            factTable.getName(),
+            Joiner.on("__").join(partitionColumnNames),
+            Math.abs(joinColumnPairs.hashCode()));
+
+    if (checkTableExists(this.innocentDatabase, partitionedTableName)) {
+      Logger.info(
+          "Partitioned table '{}.{}' already exists", this.innocentDatabase, partitionedTableName);
+      return;
+    }
+
+    Set<Column> factTableColumns = factTable.getColumns();
+    List<String> columnStrList = new ArrayList<>();
+    List<String> partitionColumnStrList = new ArrayList<>();
+    List<String> partitionColumnStrAsList = new ArrayList<>();
+    for (Column factTableColumn : factTableColumns) {
+      columnStrList.add(factTableColumn.getName() + " " + factTableColumn.getType());
+    }
+    for (Column partitionColumn : columnSet) {
+      // add '_part' as suffix for partition columns
+      partitionColumnStrList.add(partitionColumn.getName() + "_part " + partitionColumn.getType());
+    }
+
+    String createTableSql =
+        String.format(
+            "CREATE TABLE IF NOT EXISTS %s.%s (%s) " + "PARTITIONED BY (%s) STORED AS PARQUET",
+            this.innocentDatabase,
+            partitionedTableName,
+            Joiner.on(",").join(columnStrList),
+            Joiner.on(",").join(partitionColumnStrList));
+
+    columnStrList.clear();
+    partitionColumnStrList.clear();
+    for (Column factTableColumn : factTableColumns) {
+      columnStrList.add(factTableColumn.getName());
+    }
+    for (Column partitionColumn : columnSet) {
+      partitionColumnStrList.add(partitionColumn.getName() + "_part");
+      partitionColumnStrAsList.add(
+          partitionColumn.getName() + " AS " + partitionColumn.getName() + "_part");
+    }
+    List<String> whereClauses = new ArrayList<>();
+    for (UnorderedPair<Column> joinColumnPair : joinColumnPairs) {
+      whereClauses.add(
+          joinColumnPair.getLeft().getName() + " = " + joinColumnPair.getRight().getName());
+    }
+
+    String insertSql =
+        String.format(
+            "INSERT OVERWRITE TABLE %s.%s PARTITION (%s) SELECT %s,%s FROM %s,%s WHERE %s",
+            this.innocentDatabase,
+            partitionedTableName,
+            Joiner.on(",").join(partitionColumnStrList),
+            Joiner.on(",").join(columnStrList),
+            Joiner.on(",").join(partitionColumnStrAsList),
+            factTable.getName(),
+            Joiner.on(",").join(dimTables),
+            Joiner.on(" AND ").join(whereClauses));
+
+    this.execute(createTableSql);
+    this.execute(insertSql);
+    this.execute(String.format("COMPUTE STATS %s.%s", this.innocentDatabase, partitionedTableName));
+  }
+
+  @Override
+  public void createStratifiedSample(String database, StratifiedSample s) throws SQLException {
     this.createStratifiedSample(database, database, s);
   }
 
   @Override
-  public void createStratifiedSample(String targetDatabase, String sourceDatabase, Sample s)
-      throws SQLException {
+  public void createStratifiedSample(
+      String targetDatabase, String sourceDatabase, StratifiedSample s) throws SQLException {
     String sampleTable = s.getSampleTableName();
     String sampleStatTable = s.getSampleTableName() + "___stat";
-    String sourceTable = s.getTable();
+    String sourceTable = s.getTable().getName();
 
-    long maxGroupSize = this.getMaxGroupSize(s.getTable(), s.getColumnSet());
+    long maxGroupSize = this.getMaxGroupSize(s.getTable().getName(), s.getColumnSet());
     if (maxGroupSize != -1 && maxGroupSize < s.getMinRows()) {
       Logger.warn(
           "Sample '{}' will not be created as its max group size is {} when specified size is {}",
@@ -232,6 +344,78 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   }
 
   @Override
+  public long calculateNumDistinct(Column column) throws SQLException {
+
+    String key =
+        String.format(
+            "count distinct of {%s} on %s.%s", column.getName(), sourceDatabase, column.getTable());
+    String val = meta.get(key);
+    if (val != null) {
+      long value = Long.parseLong(val);
+      column.setNumDistinctValues(value);
+      return value;
+    }
+
+    String sql =
+        String.format(
+            "SELECT COUNT(DISTINCT %s) FROM %s.%s",
+            column.getName(), sourceDatabase, column.getTable());
+
+    ResultSet rs = this.executeQuery(sql);
+    if (rs.next()) {
+      long value = rs.getLong(1);
+      column.setNumDistinctValues(value);
+      meta.put(key, String.valueOf(value));
+    }
+    return column.getNumDistinctValues();
+  }
+
+  @Override
+  public void calculateStatsForPartitionCandidate(PartitionCandidate candidate)
+      throws SQLException {
+    Prejoin prejoin = candidate.getPrejoin();
+    Set<Column> columnSet = candidate.getColumnSet();
+
+    String prejoinTableName = prejoin.getPrejoinTableName();
+    double sampleRatio = prejoin.getSampleRatio();
+
+    List<String> groupByColumns = new ArrayList<>();
+    for (Column column : columnSet) {
+      groupByColumns.add(column.getName());
+    }
+
+    String groupByClause = Joiner.on(",").join(groupByColumns);
+    String key =
+        String.format(
+            "stats_for columns: {%s} on %s.%s", groupByClause, innocentDatabase, prejoinTableName);
+    String val = meta.get(key);
+    if (val != null) {
+      String[] values = val.split(",");
+      candidate.setMinPartitionSize(Long.parseLong(values[0]));
+      candidate.setMaxPartitionSize(Long.parseLong(values[1]));
+      candidate.setAvgPartitionSize(Long.parseLong(values[2]));
+      return;
+    }
+
+    String sql =
+        String.format(
+            "SELECT min(groupsize), max(groupsize), avg(groupsize) FROM "
+                + "(SELECT COUNT(*) as groupsize FROM %s.%s GROUP BY %s) tmp",
+            innocentDatabase, prejoinTableName, groupByClause);
+
+    ResultSet rs = this.executeQuery(sql);
+    if (rs.next()) {
+      long minGroupSize = (long) (rs.getDouble(1) / sampleRatio);
+      long maxGroupSize = (long) (rs.getDouble(2) / sampleRatio);
+      long avgGroupSize = (long) (rs.getDouble(3) / sampleRatio);
+      candidate.setMinPartitionSize(minGroupSize);
+      candidate.setMaxPartitionSize(maxGroupSize);
+      candidate.setAvgPartitionSize(avgGroupSize);
+      meta.put(key, minGroupSize + "," + maxGroupSize + "," + avgGroupSize);
+    }
+  }
+
+  @Override
   public double runQueryAndSaveResult(Query q, Args args) throws SQLException {
     String resultTable = q.getResultTableName();
     String resultDatabase = args.getDatabase() + Database.RESULT_DATABASE_SUFFIX;
@@ -356,31 +540,93 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   }
 
   @Override
-  public void constructPrejoin(String database, Prejoin p) throws SQLException {
-    List<String> tableNameList = new ArrayList<>();
-    //    for (Table table : p.getTables()) {
-    //      tableNameList.add(table.getName());
-    //    }
-    //
-    //    String fromClause = Joiner.on(",").join(tableNameList);
-    //    List<String> joinExpressions = new ArrayList<>();
-    //    for (Set<String> joinKey : p.getJoinKeys()) {
-    //      if (joinKey.size() == 2) {
-    //        // this should be the case
-    //        List<String> keys = new ArrayList<>(joinKey);
-    //        joinExpressions.add(String.format("%s = %s", keys.get(0), keys.get(1)));
-    //      }
-    //    }
-    //    String joinClause = Joiner.on(" AND ").join(joinExpressions);
+  public String getRandomFunction() {
+    int randomNum = ThreadLocalRandom.current().nextInt(0, (int) 1e6);
+    // 1. unix_timestamp() prevents the same random numbers are generated for different column
+    // especially when "create table as select" is used.
+    // 2. adding a random number to the timestamp prevents the same random numbers are generated
+    // for different columns.
+    return String.format("rand(unix_timestamp()+%d)", randomNum);
+  }
 
-    //    String sql =
-    //        String.format(
-    //            "CREATE TABLE %s.%s STORED AS PARQUET AS SELECT * FROM %s WHERE %s",
-    //            database, p.getPrejoinTableName(), fromClause, joinClause);
-    //
-    //    this.execute(sql);
-    //
-    //    sql = String.format("COMPUTE STATS %s.%s", database, p.getPrejoinTableName());
-    //    this.execute(sql);
+  @Override
+  public String getCurrentTimestamp() {
+    return "current_timestamp()";
+  }
+
+  @Override
+  public void createUniformSample(String targetDatabase, String sourceDatabase, UniformSample s)
+      throws SQLException {
+    String sampleTableName = s.getSampleTableName();
+    if (checkTableExists(targetDatabase, sampleTableName)) {
+      Logger.info("Uniform sample '{}.{}' already exists", targetDatabase, sampleTableName);
+      return;
+    }
+
+    String sql =
+        String.format(
+            "CREATE TABLE IF NOT EXISTS %s.%s STORED AS PARQUET "
+                + "AS SELECT * FROM %s.%s WHERE %s < %.4f",
+            targetDatabase,
+            sampleTableName,
+            sourceDatabase,
+            s.getTable().getName(),
+            this.getRandomFunction(),
+            s.getRatio());
+
+    // create uniform sample
+    this.execute(sql);
+
+    // compute stats for the sample
+    this.execute(String.format("COMPUTE STATS %s.%s", targetDatabase, sampleTableName));
+  }
+
+  @Override
+  public void constructPrejoinWithUniformSample(
+      String targetDatabase, String sourceDatabase, Prejoin p, double ratio) throws SQLException {
+
+    InnocentMeta meta = InnocentMeta.getInstance(targetDatabase, this);
+    p.setSampleRatio(ratio);
+    String metaString = p.getJsonStringForJoinSet();
+    String prejoinTableName = p.getPrejoinTableName();
+    if (checkTableExists(targetDatabase, prejoinTableName)) {
+      Logger.info("Prejoin '{}.{}' already exists", targetDatabase, prejoinTableName);
+      return;
+    }
+
+    UniformSample uniformSample = new UniformSample(p.getFactTable(), ratio);
+    // construct uniform sample if not exists
+    this.createUniformSample(targetDatabase, sourceDatabase, uniformSample);
+
+    String factTableSampleName = uniformSample.getSampleTableName();
+    Set<FactDimensionJoin> joinSet = p.getJoinSet();
+
+    List<String> tableList = new ArrayList<>();
+    List<String> joinExpressions = new ArrayList<>();
+    tableList.add(targetDatabase + "." + factTableSampleName);
+
+    for (FactDimensionJoin j : joinSet) {
+      tableList.add(sourceDatabase + "." + j.getDimensionTable().getName());
+      for (UnorderedPair<Column> joinPair : j.getJoinPairs()) {
+        joinExpressions.add(joinPair.getLeft().getName() + " = " + joinPair.getRight().getName());
+      }
+    }
+
+    String sql =
+        String.format(
+            "CREATE TABLE IF NOT EXISTS %s.%s STORED AS PARQUET AS SELECT * FROM %s WHERE %s",
+            targetDatabase,
+            prejoinTableName,
+            Joiner.on(",").join(tableList),
+            Joiner.on(" AND ").join(joinExpressions));
+
+    // create prejoin with uniform sample
+    this.execute(sql);
+
+    // compute stats for the prejoin
+    this.execute(String.format("COMPUTE STATS %s.%s", targetDatabase, prejoinTableName));
+
+    // add metadata
+    meta.put(prejoinTableName, metaString);
   }
 }

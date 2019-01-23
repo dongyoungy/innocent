@@ -7,13 +7,15 @@ import java.sql.SQLException;
 
 /** Created by Dong Young Yoon on 2018-12-15. */
 public class Column {
-  private Table table;
+  private String table;
   private String name;
   private String type;
   private long numDistinctValues;
 
+  public Column() {}
+
   public Column(Table table, String name, String type) {
-    this.table = table;
+    this.table = table.getName();
     this.name = name;
     this.type = type;
   }
@@ -27,7 +29,7 @@ public class Column {
 
   @Override
   public String toString() {
-    return String.format("{%s, %s, %s}", table.getName(), name, type);
+    return String.format("{%s, %s}", name, type);
   }
 
   public String getName() {
@@ -36,6 +38,10 @@ public class Column {
 
   public void setName(String name) {
     this.name = name;
+  }
+
+  public String getTable() {
+    return table;
   }
 
   public String getType() {
@@ -55,7 +61,7 @@ public class Column {
   }
 
   public void calculateNumDistinctValue(DatabaseImpl database) throws SQLException {
-    String sql = String.format("SELECT COUNT(DISTINCT %s) FROM %s", name, table.getName());
+    String sql = String.format("SELECT COUNT(DISTINCT %s) FROM %s", name, table);
 
     ResultSet rs = database.executeQuery(sql);
     if (rs.next()) {

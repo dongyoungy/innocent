@@ -1,5 +1,8 @@
 package dyoon.innocent.data;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+
 import java.util.HashSet;
 import java.util.Set;
 
@@ -7,6 +10,7 @@ import java.util.Set;
 public class Table implements Comparable<Table> {
 
   protected String name;
+  @JsonIgnore
   protected Set<Column> columns;
 
   public Table(String name) {

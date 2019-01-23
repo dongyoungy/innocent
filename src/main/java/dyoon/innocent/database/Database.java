@@ -1,5 +1,6 @@
 package dyoon.innocent.database;
 
+import dyoon.innocent.InnocentMeta;
 import org.pmw.tinylog.Logger;
 
 import java.io.IOException;
@@ -13,6 +14,9 @@ public abstract class Database implements DatabaseImpl {
 
   public static final String RESULT_DATABASE_SUFFIX = "_result";
   protected Connection conn;
+  protected InnocentMeta meta;
+  protected String sourceDatabase;
+  protected String innocentDatabase;
 
   @Override
   public boolean checkTableExists(String table) throws SQLException {
@@ -29,15 +33,28 @@ public abstract class Database implements DatabaseImpl {
   }
 
   @Override
-  public ResultSet executeQuery(String sql) throws SQLException {
+  public ResultSet executeQuery(String sql) {
     Logger.debug("Executing: {}", sql);
-    return conn.createStatement().executeQuery(sql);
+    ResultSet rs = null;
+    try {
+      rs = conn.createStatement().executeQuery(sql);
+    } catch (SQLException e) {
+      Logger.error("Error while executing: {}", sql);
+      e.printStackTrace();
+    }
+    return rs;
   }
 
   @Override
-  public boolean execute(String sql) throws SQLException {
+  public boolean execute(String sql) {
     Logger.debug("Executing: {}", sql);
-    return conn.createStatement().execute(sql);
+    try {
+      return conn.createStatement().execute(sql);
+    } catch (SQLException e) {
+      Logger.error("Error while executing: {}", sql);
+      e.printStackTrace();
+    }
+    return false;
   }
 
   @Override

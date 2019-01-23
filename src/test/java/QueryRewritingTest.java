@@ -1,7 +1,8 @@
 import dyoon.innocent.AQPInfo;
 import dyoon.innocent.InnocentEngine;
 import dyoon.innocent.Query;
-import dyoon.innocent.Sample;
+import dyoon.innocent.StratifiedSample;
+import dyoon.innocent.data.Table;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.junit.Test;
 
@@ -13,7 +14,7 @@ import static org.junit.Assert.assertEquals;
 /** Created by Dong Young Yoon on 11/18/18. */
 public class QueryRewritingTest {
 
-  private Sample s;
+  private StratifiedSample s;
 
   private static final String TABLE_NAME = "t1";
 
@@ -22,7 +23,7 @@ public class QueryRewritingTest {
   private static final int MIN_ROWS = 100;
 
   public QueryRewritingTest() {
-    s = new Sample(Sample.Type.STRATIFIED, TABLE_NAME, Arrays.asList(SAMPLE_COLUMNS), MIN_ROWS);
+    s = new StratifiedSample(new Table("t1"), Arrays.asList(SAMPLE_COLUMNS), MIN_ROWS);
   }
 
   @Test

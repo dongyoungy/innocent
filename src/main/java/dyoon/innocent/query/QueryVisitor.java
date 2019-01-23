@@ -1,6 +1,6 @@
 package dyoon.innocent.query;
 
-import dyoon.innocent.Sample;
+import dyoon.innocent.StratifiedSample;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlCall;
@@ -46,7 +46,7 @@ public class QueryVisitor extends SqlShuttle {
   private int numTableSubstitutions;
 
   private SortedSet<String> sampleGroupByList;
-  private Map<String, Sample> tableToSampleMap;
+  private Map<String, StratifiedSample> tableToSampleMap;
 
   public QueryVisitor() {
     this.aliasMap = new HashMap<>();
@@ -64,8 +64,8 @@ public class QueryVisitor extends SqlShuttle {
     this.tableToSampleMap = new HashMap<>();
   }
 
-  public void addTableToSample(String table, Sample sample) {
-    tableToSampleMap.put(table, sample);
+  public void addTableToSample(String table, StratifiedSample stratifiedSample) {
+    tableToSampleMap.put(table, stratifiedSample);
   }
 
   public Map<SqlIdentifier, SqlNode> getWithQueryMap() {
@@ -118,7 +118,7 @@ public class QueryVisitor extends SqlShuttle {
   }
 
   private SqlNode substituteTable(SqlIdentifier id) {
-    for (Map.Entry<String, Sample> entry : this.tableToSampleMap.entrySet()) {
+    for (Map.Entry<String, StratifiedSample> entry : this.tableToSampleMap.entrySet()) {
       for (int i = 0; i < id.names.size(); ++i) {
         if (id.names.get(i).equalsIgnoreCase(entry.getKey())) {
           ++numTableSubstitutions;
@@ -194,10 +194,11 @@ public class QueryVisitor extends SqlShuttle {
               },
               SqlParserPos.ZERO);
       select.getSelectList().add(groupSize);
-      for (Sample sample : tableToSampleMap.values()) {
-        for (String groupBy : sample.getColumnSet()) {
+      for (StratifiedSample stratifiedSample : tableToSampleMap.values()) {
+        for (String groupBy : stratifiedSample.getColumnSet()) {
           SqlIdentifier newGroupBy =
-              new SqlIdentifier(Arrays.asList(sample.getTable(), groupBy), SqlParserPos.ZERO);
+              new SqlIdentifier(
+                  Arrays.asList(stratifiedSample.getTable().getName(), groupBy), SqlParserPos.ZERO);
           select.getSelectList().add(newGroupBy);
           select.getGroup().add(newGroupBy);
         }
@@ -296,14 +297,14 @@ public class QueryVisitor extends SqlShuttle {
     }
   }
 
-  public SqlIdentifier getSampleAlias(Sample s) {
+  public SqlIdentifier getSampleAlias(StratifiedSample s) {
     for (Map.Entry<SqlIdentifier, SqlIdentifier> entry : aliasMap.entrySet()) {
       SqlIdentifier key = entry.getKey();
       // This check needs to be revised later.
-      if (key.toString().toLowerCase().contains(s.getTable().toLowerCase())) {
+      if (key.toString().toLowerCase().contains(s.getTable().getName().toLowerCase())) {
         return entry.getValue();
       }
     }
-    return new SqlIdentifier(s.getTable(), SqlParserPos.ZERO);
+    return new SqlIdentifier(s.getTable().getName(), SqlParserPos.ZERO);
   }
 }

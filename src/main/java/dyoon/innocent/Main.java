@@ -3,6 +3,10 @@ package dyoon.innocent;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
 import com.google.common.io.Files;
+import dyoon.innocent.data.Column;
+import dyoon.innocent.data.PartitionCandidate;
+import dyoon.innocent.data.Prejoin;
+import dyoon.innocent.data.Table;
 import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.database.ImpalaDatabase;
 import dyoon.innocent.query.AggNonAggDetector;
@@ -57,6 +61,7 @@ public class Main {
 
     String host = args.getHost();
     String db = args.getDatabase();
+    String innocentDatabase = args.getDatabaseForInnocent();
     String user = "";
     String password = "";
     String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
@@ -64,7 +69,7 @@ public class Main {
     // set log level
     Configurator.currentConfig().level(Level.DEBUG).activate();
 
-    DatabaseImpl database = new ImpalaDatabase(host, db, user, password);
+    DatabaseImpl database = new ImpalaDatabase(host, db, innocentDatabase, user, password);
     Data data = new Data();
     InnocentEngine engine = new InnocentEngine(database, args, timestamp);
     File current;
@@ -117,23 +122,31 @@ public class Main {
           }
         }
       } else if (args.isCreateDuplicateSamples()) {
-        String table = args.getSampleTable();
+        String tableName = args.getSampleTable();
         String colStr = args.getSampleColumns();
         String[] columns = colStr.split(",");
         long minRow = args.getSampleRows();
         String type = args.getSampleType(); // ignored for now
         long numSample = args.getNumSampleToCreate();
 
+        Set<Table> allTables = database.getAllTableAndColumns(args.getDatabase());
+        List<Column> allColumns = Utils.getAllColumns(allTables);
+
+        Table table = Utils.findTableByName(allTables, tableName);
+
         for (int i = 1; i <= numSample; ++i) {
-          Sample s = new Sample(Sample.Type.STRATIFIED, table, Arrays.asList(columns), minRow, i);
+          StratifiedSample s = new StratifiedSample(table, Arrays.asList(columns), minRow, i);
           database.createStratifiedSample(args.getDatabaseForInnocent(), args.getDatabase(), s);
         }
 
       } else if (args.isTest()) {
 
-        List<Sample> samples = new ArrayList<>();
+        List<StratifiedSample> stratifiedSamples = new ArrayList<>();
         List<String> tables = database.getTables();
         String[] factTables = args.getFactTables().split(",");
+
+        Set<Table> allTables = database.getAllTableAndColumns(args.getDatabase());
+        List<Column> allColumns = Utils.getAllColumns(allTables);
 
         List<String> factTableList = Arrays.asList(factTables);
         List<Integer> minRows = new ArrayList<>();
@@ -165,18 +178,13 @@ public class Main {
         //        }
 
         // temp
+        Table t = Utils.findTableByName(allTables, "store_sales");
         for (int i = 1; i <= 100; ++i) {
-          Sample s1 =
-              new Sample(
-                  Sample.Type.STRATIFIED,
-                  "store_sales",
-                  Arrays.asList("ss_sold_date_sk"),
-                  10000,
-                  i);
-          samples.add(s1);
+          StratifiedSample s1 = new StratifiedSample(t, Arrays.asList("ss_sold_date_sk"), 10000, i);
+          stratifiedSamples.add(s1);
         }
 
-        for (Sample s : samples) {
+        for (StratifiedSample s : stratifiedSamples) {
           int sampleCount = 0;
 
           for (File file : queryFiles) {
@@ -235,7 +243,7 @@ public class Main {
               String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
               sql = sql.replaceAll(";", "");
 
-              //              if (!id.equalsIgnoreCase("query12")) {
+              //              if (!id.equalsIgnoreCase("query13")) {
               //                continue;
               //              }
 
@@ -260,14 +268,14 @@ public class Main {
             .activate();
 
         // construct necessary prejoins
-        engine.buildPrejoins();
+        Set<Prejoin> prejoins = engine.buildPrejoins();
 
-        engine.createPartitionCandidates();
+        // calculate necessary stats for predicate columns in prejoins
+        Set<PartitionCandidate> candidates = engine.createPartitionCandidates(prejoins, 100000);
 
-        //
+        Set<PartitionCandidate> bestPartitionGreedy = engine.findBestPartitionGreedy(candidates, 0.01, 3);
 
-        //        engine.buildPartitions();
-        //        engine.findBestColumnsForPartition(6); // k
+        engine.buildPartitions(bestPartitionGreedy);
 
         System.out.println();
       } else {
@@ -277,6 +285,8 @@ public class Main {
           return;
         }
 
+        Set<Table> allTables = database.getAllTableAndColumns(args.getDatabase());
+        List<Column> allColumns = Utils.getAllColumns(allTables);
         String[] factTables = args.getFactTables().split(",");
 
         for (String table : database.getTables()) {
@@ -345,9 +355,10 @@ public class Main {
                 minRows.add(val);
               }
 
+              Table t = Utils.findTableByName(allTables, table);
               for (SortedSet<String> sampleColumns : set) {
                 for (Integer minRow : minRows) {
-                  Sample s = new Sample(Sample.Type.STRATIFIED, table, sampleColumns, minRow);
+                  StratifiedSample s = new StratifiedSample(t, sampleColumns, minRow);
                   Logger.info("Creating sample: {}", s.getSampleTableName());
                   database.createStratifiedSample(db, s);
                 }

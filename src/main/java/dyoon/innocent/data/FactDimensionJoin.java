@@ -1,5 +1,6 @@
 package dyoon.innocent.data;
 
+import dyoon.innocent.Query;
 import dyoon.innocent.Utils;
 import org.apache.calcite.sql.SqlIdentifier;
 
@@ -17,6 +18,7 @@ public class FactDimensionJoin {
   private Table dimensionTable;
   private Set<UnorderedPair<Column>> joinColumns;
   private Set<Predicate> predicates;
+  private Set<Query> querySet;
 
   public FactDimensionJoin(
       Table factTable, Table dimensionTable, Set<UnorderedPair<Column>> joinColumns) {
@@ -24,6 +26,7 @@ public class FactDimensionJoin {
     this.dimensionTable = dimensionTable;
     this.joinColumns = joinColumns;
     this.predicates = new HashSet<>();
+    this.querySet = new HashSet<>();
   }
 
   @Override
@@ -41,6 +44,14 @@ public class FactDimensionJoin {
     }
 
     return false;
+  }
+
+  public void addQuery(Query q) {
+    this.querySet.add(q);
+  }
+
+  public Set<Query> getQuerySet() {
+    return querySet;
   }
 
   public void addPredicate(Predicate p) {

@@ -30,7 +30,11 @@ public class TempMain {
 
     ImpalaDatabase database =
         new ImpalaDatabase(
-            "c220g2-011018.wisc.cloudlab.us:21050", "tpcds_500_parquet_result", "", "");
+            "c220g2-011018.wisc.cloudlab.us:21050",
+            "tpcds_500_parquet_result",
+            "tpcds_500_parquet_result_innocent",
+            "",
+            "");
 
     // get query results with 20 samples for bootstrap
     Map<Integer, List<Double>> results = new HashMap<>();
@@ -153,7 +157,11 @@ public class TempMain {
 
       ImpalaDatabase database =
           new ImpalaDatabase(
-              "c220g2-011018.wisc.cloudlab.us:21050", "tpcds_500_parquet_result", "", "");
+              "c220g2-011018.wisc.cloudlab.us:21050",
+              "tpcds_500_parquet_result",
+              "tpcds_500_parquet_result_innocent",
+              "",
+              "");
 
       // get query results with 20 samples for bootstrap
       List<Double> results = new ArrayList<>();
