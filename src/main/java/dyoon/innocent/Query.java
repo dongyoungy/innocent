@@ -135,6 +135,14 @@ public class Query implements Comparable<Query> {
     return total;
   }
 
+  public long getTotalCurrentReducedCost() {
+    long total = 0;
+    for (Long value : this.reducedCostMap.values()) {
+      total += value;
+    }
+    return total;
+  }
+
   @Override
   public int compareTo(Query o) {
     return id.compareTo(o.id);

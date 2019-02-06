@@ -240,7 +240,11 @@ public class InnocentEngine {
       }
 
       PriorityQueue<Pair<Column, Integer>> predColumnQueue =
-          new PriorityQueue<>(predColumnSet.size(), (o1, o2) -> o2.getRight() - o1.getRight());
+          new PriorityQueue<>(
+              predColumnSet.size(),
+              (o1, o2) ->
+                  10000 * (o2.getRight() - o1.getRight())
+                      + o1.getLeft().getName().compareTo(o2.getLeft().getName()));
 
       for (Map.Entry<Column, Integer> entry : predColumnFreq.entrySet()) {
         predColumnQueue.add(ImmutablePair.of(entry.getKey(), entry.getValue()));
@@ -374,100 +378,122 @@ public class InnocentEngine {
     Set<PartitionCandidate> candidatesToConsider = new HashSet<>(candidates);
     SortedSet<Query> queriesToConsider = new TreeSet<>(this.allQueries);
 
-    int rank = 1;
-    while (bestPartitions.size() < size) {
+    for (Table factTable : factTableSet) {
 
-      for (PartitionCandidate candidate : candidatesToConsider) {
-        int numQueryWithTargetIOBound = 0;
-        double totalIOReduction = 0;
-        candidate.clearQueries();
-        for (Query query : queriesToConsider) {
-          Map<
-                  Table,
-                  com.google.common.collect.Table<
-                      Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
-              predicateTableMap = query.getPredicateTableMap();
-          Set<PredicateColumn> usedColumnSet = findUsedColumnSet(candidate, predicateTableMap);
-          if (!usedColumnSet.isEmpty()) {
-            Set<Column> currentColumnSet = new HashSet<>();
-            int multiplier = 1;
-            for (PredicateColumn predicateColumn : usedColumnSet) {
-              currentColumnSet.add(predicateColumn.getColumn());
-              multiplier *= predicateColumn.getMultiplier();
-            }
+      int rank = 1;
+      Set<PartitionCandidate> bestPartitionsForCurrentTable = new HashSet<>();
+      while (bestPartitionsForCurrentTable.size() < size) {
+        Set<PartitionCandidate> currentCandidates = new HashSet<>();
 
-            PartitionCandidate pcForThisQuery =
-                new PartitionCandidate(candidate.getPrejoin(), currentColumnSet);
-            database.calculateStatsForPartitionCandidate(pcForThisQuery);
+        for (PartitionCandidate candidate : candidatesToConsider) {
+          if (!candidate.getPrejoin().getFactTable().equals(factTable)) {
+            continue;
+          }
 
-            long reducedQueryCost = 0;
-            long queryCost = 0;
-            for (AliasedTable table : query.getTables()) {
-              if (factTableSet.contains(table.getTable())) {
-                long tableSize = this.database.getTableSize(table.getTable());
-                Table fact = table.getTable();
-                query.setCostIfNull(fact, tableSize);
-                query.setReducedCostIfNull(fact, tableSize);
+          currentCandidates.add(candidate);
+          int numQueryWithTargetIOBound = 0;
+          double totalIOReduction = 0;
+          candidate.clearQueries();
+          for (Query query : queriesToConsider) {
+            Map<
+                    Table,
+                    com.google.common.collect.Table<
+                        Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
+                predicateTableMap = query.getPredicateTableMap();
+            Set<PredicateColumn> usedColumnSet = findUsedColumnSet(candidate, predicateTableMap);
+            if (!usedColumnSet.isEmpty()) {
+              Set<Column> currentColumnSet = new HashSet<>();
+              int multiplier = 1;
+              for (PredicateColumn predicateColumn : usedColumnSet) {
+                currentColumnSet.add(predicateColumn.getColumn());
+                multiplier *= predicateColumn.getMultiplier();
+              }
 
-                queryCost += query.getCost(fact);
-                long currentReducedCost = query.getReducedCost(fact);
-                if (candidate.getPrejoin().getFactTable().equals(table.getTable())) {
-                  long reducedCost = (multiplier * pcForThisQuery.getMaxParitionSize());
+              PartitionCandidate pcForThisQuery =
+                  new PartitionCandidate(candidate.getPrejoin(), currentColumnSet);
+              database.calculateStatsForPartitionCandidate(pcForThisQuery);
 
-                  if (reducedCost < currentReducedCost) {
-                    candidate.setQueryCost(query, table.getTable(), reducedCost);
+              long reducedQueryCost = 0;
+              long queryCost = 0;
+              for (AliasedTable table : query.getTables()) {
+                if (factTableSet.contains(table.getTable())) {
+                  long tableSize = this.database.getTableSize(table.getTable());
+                  Table fact = table.getTable();
+                  query.setCostIfNull(fact, tableSize);
+                  query.setReducedCostIfNull(fact, tableSize);
+
+                  queryCost += query.getCost(fact);
+                  long currentReducedCost = query.getReducedCost(fact);
+                  if (candidate.getPrejoin().getFactTable().equals(table.getTable())) {
+                    long reducedCost = (multiplier * pcForThisQuery.getMaxParitionSize());
+
+                    if (reducedCost < currentReducedCost) {
+                      candidate.setQueryCost(query, table.getTable(), reducedCost);
+                    } else {
+                      reducedCost = currentReducedCost;
+                    }
+                    reducedQueryCost += reducedCost;
                   } else {
-                    reducedCost = currentReducedCost;
+                    reducedQueryCost += currentReducedCost;
                   }
-                  reducedQueryCost += reducedCost;
-                } else {
-                  reducedQueryCost += currentReducedCost;
                 }
               }
-            }
 
-            double reducedIO = (double) reducedQueryCost / (double) queryCost;
-            if (reducedIO < targetIOBound) {
-              ++numQueryWithTargetIOBound;
-              candidate.addQuery(query);
-            } else if (reducedIO < 1) {
-              totalIOReduction += (1 - reducedIO);
-              candidate.addEffectiveQuery(query);
+              double totalReducedIO = (double) reducedQueryCost / (double) queryCost;
+              double currentReducedIO =
+                  (double) reducedQueryCost / (double) query.getTotalCurrentReducedCost();
+              if (totalReducedIO < targetIOBound) {
+                ++numQueryWithTargetIOBound;
+                candidate.addQuery(query);
+              } else if (currentReducedIO < 1) {
+                totalIOReduction += (1 - currentReducedIO);
+                candidate.addEffectiveQuery(query);
+              }
             }
           }
+          candidate.setNumQueryMeetingIOBound(numQueryWithTargetIOBound);
+          candidate.setTotalIOReductionForOtherQueries(totalIOReduction);
         }
-        candidate.setNumQueryMeetingIOBound(numQueryWithTargetIOBound);
-        candidate.setTotalIOReductionForOtherQueries(totalIOReduction);
+
+        if (currentCandidates.isEmpty()) {
+          break;
+        }
+
+        List<PartitionCandidate> pcList = new ArrayList<>(currentCandidates);
+        // sort to find best candidate
+        pcList.sort(
+            (o1, o2) -> {
+              int comp1 =
+                  (o2.getNumQueryMeetingIOBound() - o1.getNumQueryMeetingIOBound()) * 100000;
+              if (comp1 != 0) {
+                return comp1;
+              } else {
+                return (int)
+                    ((o2.getTotalIOReductionForOtherQueries() * 100)
+                        - (o1.getTotalIOReductionForOtherQueries() * 100));
+              }
+            });
+
+        PartitionCandidate best = pcList.get(0);
+        if (best.getNumQueryMeetingIOBound() == 0
+            && best.getTotalIOReductionForOtherQueries() == 0) {
+          break;
+        }
+        best.setIOBound(targetIOBound);
+        best.setRank(rank++);
+
+        bestPartitionsForCurrentTable.add(best);
+        candidatesToConsider.remove(best);
+        queriesToConsider.removeAll(best.getQueriesMeetingIOBounds());
+
+        for (com.google.common.collect.Table.Cell<Query, Table, Long> cell :
+            best.getQueryCostTable().cellSet()) {
+          Query q = cell.getRowKey();
+          assert q != null;
+          q.setReducedCost(cell.getColumnKey(), cell.getValue());
+        }
       }
-
-      List<PartitionCandidate> pcList = new ArrayList<>(candidatesToConsider);
-      // sort to find best candidate
-      pcList.sort(
-          (o1, o2) -> {
-            int comp1 = (o2.getNumQueryMeetingIOBound() - o1.getNumQueryMeetingIOBound()) * 100000;
-            if (comp1 != 0) {
-              return comp1;
-            } else {
-              return (int)
-                  ((o2.getTotalIOReductionForOtherQueries() * 100)
-                      - (o1.getTotalIOReductionForOtherQueries() * 100));
-            }
-          });
-
-      PartitionCandidate best = pcList.get(0);
-      best.setIOBound(targetIOBound);
-      best.setRank(rank++);
-
-      bestPartitions.add(best);
-      candidatesToConsider.remove(best);
-      queriesToConsider.removeAll(best.getQueriesMeetingIOBounds());
-
-      for (com.google.common.collect.Table.Cell<Query, Table, Long> cell :
-          best.getQueryCostTable().cellSet()) {
-        Query q = cell.getRowKey();
-        assert q != null;
-        q.setReducedCost(cell.getColumnKey(), cell.getValue());
-      }
+      bestPartitions.addAll(bestPartitionsForCurrentTable);
     }
     return bestPartitions;
   }

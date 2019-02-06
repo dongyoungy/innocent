@@ -99,11 +99,18 @@ public class Args {
       description = "sample ratio to be used for fact table in prejoin")
   private double prejoinSampleRatio = 0.01;
 
+  @Parameter(names = "--target-io-bound", description = "target I/O bound")
+  private double targetIOBound = 0.01;
+
   @Parameter(names = "--partition-budget", description = "partition budget")
   private int partitionBudget = 2;
 
   @Parameter(names = "--max-partition-per-table", description = "max partitions per table")
   private int maxPartitionsPerTable = 10000;
+
+  public double getTargetIOBound() {
+    return targetIOBound;
+  }
 
   public double getPrejoinSampleRatio() {
     return prejoinSampleRatio;

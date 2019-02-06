@@ -276,7 +276,7 @@ public class Main {
 
         Set<PartitionCandidate> bestPartitionGreedy =
             engine.findBestPartitionGreedy(
-                candidates, args.getPrejoinSampleRatio(), args.getPartitionBudget());
+                candidates, args.getTargetIOBound(), args.getPartitionBudget());
 
         if (args.isCreate()) {
           engine.buildPartitions(bestPartitionGreedy);
