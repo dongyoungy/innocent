@@ -7,7 +7,7 @@ public class Args {
 
   private static final String INNOCENT_DATABASE_SUFFIX = "_innocent";
 
-  @Parameter(names = "--create", description = "Create samples at the end")
+  @Parameter(names = "--create", description = "Create sample/partitions at the end")
   private boolean create = false;
 
   @Parameter(names = "--overwrite", description = "Overwrite test results")
@@ -21,6 +21,9 @@ public class Args {
 
   @Parameter(names = "--do-partition", description = "Run partition analysis")
   private boolean doPartition = false;
+
+  @Parameter(names = "--test-partition", description = "Test created partitions")
+  private boolean testPartition = false;
 
   @Parameter(names = "--test-orig-queries", description = "Test queries as-is without samples")
   private boolean testOrigQueries = false;
@@ -90,6 +93,29 @@ public class Args {
       names = {"-h", "--host"},
       description = "host")
   private String host = "c220g2-011018.wisc.cloudlab.us:21050";
+
+  @Parameter(
+      names = "--prejoin-sample-ratio",
+      description = "sample ratio to be used for fact table in prejoin")
+  private double prejoinSampleRatio = 0.01;
+
+  @Parameter(names = "--partition-budget", description = "partition budget")
+  private int partitionBudget = 2;
+
+  @Parameter(names = "--max-partition-per-table", description = "max partitions per table")
+  private int maxPartitionsPerTable = 10000;
+
+  public double getPrejoinSampleRatio() {
+    return prejoinSampleRatio;
+  }
+
+  public int getMaxPartitionsPerTable() {
+    return maxPartitionsPerTable;
+  }
+
+  public int getPartitionBudget() {
+    return partitionBudget;
+  }
 
   public boolean isCreate() {
     return create;
@@ -173,6 +199,10 @@ public class Args {
 
   public String getIgnoreFactTables() {
     return ignoreFactTables;
+  }
+
+  public boolean isTestPartition() {
+    return testPartition;
   }
 
   public String getDatabaseForInnocent() {

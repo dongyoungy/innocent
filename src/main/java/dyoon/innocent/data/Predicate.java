@@ -1,8 +1,10 @@
 package dyoon.innocent.data;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import org.apache.calcite.sql.SqlNode;
 
 /** Created by Dong Young Yoon on 2018-12-16. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -15,8 +17,18 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 public abstract class Predicate {
   protected Column column;
 
+  @JsonIgnore protected SqlNode correspondingNode;
+
   public Column getColumn() {
     return column;
+  }
+
+  public SqlNode getCorrespondingNode() {
+    return correspondingNode;
+  }
+
+  public void setCorrespondingNode(SqlNode correspondingNode) {
+    this.correspondingNode = correspondingNode;
   }
 
   public abstract String toSql();

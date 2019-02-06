@@ -60,7 +60,7 @@ public class PartitionSpace {
   public void addBoundary(Predicate p) {
     if (p instanceof EqualPredicate) {
       EqualPredicate eq = (EqualPredicate) p;
-      boundaries.add(eq.getValue());
+      boundaries.add(Double.valueOf(eq.getValue().toString()));
     } else if (p instanceof RangePredicate) {
       // if p is a range predicate, this should add 2 partitions: {>, <=} or {<, >=}
       RangePredicate r = (RangePredicate) p;

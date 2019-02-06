@@ -1,5 +1,6 @@
 package dyoon.innocent.data;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.pmw.tinylog.Logger;
 
 /** Created by Dong Young Yoon on 2018-12-16. */
@@ -9,6 +10,10 @@ public class RangePredicate extends Predicate {
   private double upperBound;
   private boolean isLowerInclusive;
   private boolean isUpperInclusive;
+
+  private RangePredicate() {
+    // for JSON
+  }
 
   public RangePredicate(
       Column column,
@@ -167,6 +172,7 @@ public class RangePredicate extends Predicate {
     return false;
   }
 
+  @JsonIgnore
   public RangePredicate getComplement() {
     double newLowerBound =
         (this.upperBound != Double.POSITIVE_INFINITY) ? this.upperBound : Double.NEGATIVE_INFINITY;

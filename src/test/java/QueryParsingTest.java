@@ -114,7 +114,7 @@ public class QueryParsingTest {
         assertEquals("c12", predicate.getColumn().getName());
         assertTrue(predicate instanceof EqualPredicate);
         EqualPredicate eq = (EqualPredicate) predicate;
-        assertEquals(100, eq.getValue(), 0.01);
+        assertEquals(100, Double.valueOf(eq.getValue().toString()), 0.01);
       }
     }
   }

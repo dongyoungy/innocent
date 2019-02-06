@@ -66,6 +66,16 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   }
 
   @Override
+  public List<String> getTables(String database) throws SQLException {
+    final List<String> tables = new ArrayList<>();
+    final ResultSet rs = this.executeQuery(String.format("SHOW TABLES IN %s", database));
+    while (rs.next()) {
+      tables.add(rs.getString(1));
+    }
+    return tables;
+  }
+
+  @Override
   public long getTableSize(Table table) throws SQLException {
     String key = String.format("table size of %s.%s", this.sourceDatabase, table.getName());
     if (cache.containsKey(key)) {
@@ -123,29 +133,38 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     SortedSet<String> partitionColumnNames = new TreeSet<>();
     Set<String> partitionColumnTypes = new HashSet<>();
     Set<String> dimTables = new HashSet<>();
+    Column maxPartitionColumn = null;
+    long maxPartition = -1;
     for (Column column : columnSet) {
       partitionColumnNames.add(column.getName());
       partitionColumnTypes.add(column.getType());
       dimTables.add(column.getTable());
+      if (maxPartition < column.getNumDistinctValues()) {
+        maxPartitionColumn = column;
+        maxPartition = column.getNumDistinctValues();
+      }
     }
+
     Set<UnorderedPair<Column>> joinColumnPairs = new HashSet<>();
+    Set<UnorderedPair<Column>> maxPartitionColumnPairs = new HashSet<>();
 
     for (FactDimensionJoin join : joinSet) {
       if (dimTables.contains(join.getDimensionTable().getName())) {
         joinColumnPairs.addAll(join.getJoinPairs());
+        if (maxPartitionColumn.getTable().equals(join.getDimensionTable().getName())) {
+          maxPartitionColumnPairs.addAll(join.getJoinPairs());
+        }
       }
     }
 
-    String partitionedTableName =
-        String.format(
-            "%s___part___%s___%d",
-            factTable.getName(),
-            Joiner.on("__").join(partitionColumnNames),
-            Math.abs(joinColumnPairs.hashCode()));
+    String partitionedTableName = candidate.getPartitionTableName();
 
     if (checkTableExists(this.innocentDatabase, partitionedTableName)) {
       Logger.info(
           "Partitioned table '{}.{}' already exists", this.innocentDatabase, partitionedTableName);
+
+      // update metadata nonetheless
+      this.meta.put(partitionedTableName, PartitionCandidate.getJsonString(candidate));
       return;
     }
 
@@ -185,21 +204,58 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
           joinColumnPair.getLeft().getName() + " = " + joinColumnPair.getRight().getName());
     }
 
-    String insertSql =
-        String.format(
-            "INSERT OVERWRITE TABLE %s.%s PARTITION (%s) SELECT %s,%s FROM %s,%s WHERE %s",
-            this.innocentDatabase,
-            partitionedTableName,
-            Joiner.on(",").join(partitionColumnStrList),
-            Joiner.on(",").join(columnStrList),
-            Joiner.on(",").join(partitionColumnStrAsList),
-            factTable.getName(),
-            Joiner.on(",").join(dimTables),
-            Joiner.on(" AND ").join(whereClauses));
+    List<String> maxPartitionwhereClauses = new ArrayList<>();
+    for (UnorderedPair<Column> joinColumnPair : maxPartitionColumnPairs) {
+      maxPartitionwhereClauses.add(
+          joinColumnPair.getLeft().getName() + " = " + joinColumnPair.getRight().getName());
+    }
 
     this.execute(createTableSql);
-    this.execute(insertSql);
+
+    String maxPartitionSql =
+        String.format(
+            "SELECT DISTINCT %s FROM %s,%s WHERE %s",
+            maxPartitionColumn.getName(),
+            factTable.getName(),
+            maxPartitionColumn.getTable(),
+            Joiner.on(" AND ").join(maxPartitionwhereClauses));
+    ResultSet rs = this.executeQuery(maxPartitionSql);
+
+    boolean isFirst = true;
+    while (rs.next()) {
+      String insertSql =
+          String.format(
+              "INSERT %s TABLE %s.%s PARTITION (%s) SELECT %s,%s FROM %s,%s WHERE %s",
+              (isFirst ? "OVERWRITE" : "INTO"),
+              this.innocentDatabase,
+              partitionedTableName,
+              Joiner.on(",").join(partitionColumnStrList),
+              Joiner.on(",").join(columnStrList),
+              Joiner.on(",").join(partitionColumnStrAsList),
+              factTable.getName(),
+              Joiner.on(",").join(dimTables),
+              Joiner.on(" AND ").join(whereClauses));
+
+      String extraWhere;
+
+      Object obj = rs.getObject(1);
+      if (rs.wasNull()) {
+        extraWhere = String.format("%s IS NULL", maxPartitionColumn.getName());
+      } else if (maxPartitionColumn.getType().equalsIgnoreCase("string")) {
+        extraWhere = String.format("%s = '%s'", maxPartitionColumn.getName(), obj.toString());
+      } else {
+        extraWhere = String.format("%s = %s", maxPartitionColumn.getName(), obj.toString());
+      }
+      insertSql += " AND " + extraWhere;
+
+      this.execute(insertSql);
+      isFirst = false;
+    }
+
     this.execute(String.format("COMPUTE STATS %s.%s", this.innocentDatabase, partitionedTableName));
+
+    // update metadata at the end
+    this.meta.put(partitionedTableName, PartitionCandidate.getJsonString(candidate));
   }
 
   @Override
@@ -413,6 +469,28 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
       candidate.setAvgPartitionSize(avgGroupSize);
       meta.put(key, minGroupSize + "," + maxGroupSize + "," + avgGroupSize);
     }
+  }
+
+  @Override
+  public Set<PartitionCandidate> getAvailablePartitionedTables() throws SQLException {
+    List<String> tables = this.getTables(this.innocentDatabase);
+    List<String> partitionedTables = new ArrayList<>();
+    for (String table : tables) {
+      String[] s = table.split("___");
+      if (s.length > 1 && s[1].equalsIgnoreCase("part")) {
+        partitionedTables.add(table);
+      }
+    }
+
+    Set<PartitionCandidate> partitionedTableSet = new HashSet<>();
+    for (String p : partitionedTables) {
+      String s = this.meta.get(p);
+      if (s != null) {
+        partitionedTableSet.add(PartitionCandidate.createFromJsonString(s));
+      }
+    }
+
+    return partitionedTableSet;
   }
 
   @Override

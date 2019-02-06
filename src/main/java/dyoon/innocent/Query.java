@@ -20,9 +20,11 @@ import java.util.Set;
 public class Query implements Comparable<Query> {
 
   private String id;
-  private String query;
-  private String aqpQuery;
-  private long cost;
+
+  @JsonIgnore private String query;
+  @JsonIgnore private String aqpQuery;
+  private Map<Table, Long> costMap;
+  private Map<Table, Long> reducedCostMap;
 
   @JsonIgnore private Set<AliasedTable> tables;
 
@@ -31,11 +33,17 @@ public class Query implements Comparable<Query> {
           Table, com.google.common.collect.Table<Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
       predicateTableMap;
 
+  private Query() {
+    // for JSON
+  }
+
   public Query(String id, String query) {
     this.id = id;
     this.query = query;
     this.tables = new HashSet<>();
     this.predicateTableMap = new HashMap();
+    this.costMap = new HashMap<>();
+    this.reducedCostMap = new HashMap<>();
   }
 
   public void addPredicate(
@@ -103,16 +111,44 @@ public class Query implements Comparable<Query> {
     return id + "_orig";
   }
 
-  public long getCost() {
-    return cost;
+  public long getCost(Table table) {
+    return costMap.get(table);
   }
 
-  public void setCost(long cost) {
-    this.cost = cost;
+  public void setCost(Table table, long cost) {
+    this.costMap.put(table, cost);
+  }
+
+  public long getReducedCost(Table table) {
+    return reducedCostMap.get(table);
+  }
+
+  public void setReducedCost(Table table, long cost) {
+    this.reducedCostMap.put(table, cost);
+  }
+
+  public long getTotalCost() {
+    long total = 0;
+    for (Long value : this.costMap.values()) {
+      total += value;
+    }
+    return total;
   }
 
   @Override
   public int compareTo(Query o) {
     return id.compareTo(o.id);
+  }
+
+  public void setCostIfNull(Table table, long cost) {
+    if (!this.costMap.containsKey(table)) {
+      this.costMap.put(table, cost);
+    }
+  }
+
+  public void setReducedCostIfNull(Table table, long cost) {
+    if (!this.reducedCostMap.containsKey(table)) {
+      this.reducedCostMap.put(table, cost);
+    }
   }
 }

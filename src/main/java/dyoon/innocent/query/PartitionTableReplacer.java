@@ -6,66 +6,55 @@ import dyoon.innocent.Utils;
 import dyoon.innocent.data.AliasedTable;
 import dyoon.innocent.data.Column;
 import dyoon.innocent.data.FactDimensionJoin;
-import dyoon.innocent.data.Join;
+import dyoon.innocent.data.PartitionCandidate;
 import dyoon.innocent.data.Predicate;
+import dyoon.innocent.data.PredicateColumn;
 import dyoon.innocent.data.Table;
 import dyoon.innocent.data.UnorderedPair;
+import dyoon.innocent.database.Database;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlSelect;
+import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.util.SqlShuttle;
 import org.pmw.tinylog.Logger;
 
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Created by Dong Young Yoon on 2018-12-15. */
-public class JoinAndPredicateFinder extends SqlShuttle {
+/** Created by Dong Young Yoon on 2019-02-01. */
+public class PartitionTableReplacer extends SqlShuttle {
 
+  private Database database;
   private Query query;
   private Set<Table> allTables;
   private List<Column> allColumns;
-
-  private Set<Join> joinSet;
+  private Set<PartitionCandidate> candidates;
   private Set<Table> factTableSet;
   private Set<Table> ignoreFactTableSet;
 
-  private Set<FactDimensionJoin> factDimensionJoinSet;
-
-  public JoinAndPredicateFinder(Query query, Set<Table> allTables, List<Column> allColumns) {
-    this.query = query;
-    this.joinSet = new HashSet<>();
-    this.allTables = allTables;
-    this.allColumns = allColumns;
-    this.factTableSet = new HashSet<>();
-    this.ignoreFactTableSet = new HashSet<>();
-    this.factDimensionJoinSet = new HashSet<>();
-  }
-
-  public JoinAndPredicateFinder(
+  public PartitionTableReplacer(
+      Database database,
       Query query,
       Set<Table> allTables,
       List<Column> allColumns,
+      Set<PartitionCandidate> candidates,
       Set<Table> factTableSet,
       Set<Table> ignoreFactTableSet) {
+    this.database = database;
     this.query = query;
-    this.joinSet = new HashSet<>();
     this.allTables = allTables;
     this.allColumns = allColumns;
+    this.candidates = candidates;
     this.factTableSet = factTableSet;
     this.ignoreFactTableSet = ignoreFactTableSet;
-    this.factDimensionJoinSet = new HashSet<>();
-  }
-
-  public Set<FactDimensionJoin> getFactDimensionJoinSet() {
-    return factDimensionJoinSet;
-  }
-
-  public Set<Join> getJoinSet() {
-    return joinSet;
   }
 
   @Override
@@ -81,6 +70,7 @@ public class JoinAndPredicateFinder extends SqlShuttle {
       if (select.getWhere() != null) {
         select.getWhere().accept(extractor);
       }
+
       // joined aliasedTables with alias information
       Set<AliasedTable> tables = extractor.getTables();
       PredicateExtractor pe = new PredicateExtractor(allColumns, tables);
@@ -99,6 +89,8 @@ public class JoinAndPredicateFinder extends SqlShuttle {
 
       com.google.common.collect.Table<AliasedTable, AliasedTable, Set<UnorderedPair<SqlIdentifier>>>
           joinTable = HashBasedTable.create();
+
+      Set<AliasedTable> factTables = new HashSet<>();
 
       // gather fact-dimension table join relationship information
       for (UnorderedPair<SqlIdentifier> keyPair : joinKeyPairSet) {
@@ -132,12 +124,14 @@ public class JoinAndPredicateFinder extends SqlShuttle {
         if (factTableCount == 1 && !isIgnoreFactTable(factTable)) { // i.e., fact + dimension
           if (!joinTable.contains(factTable, dimTable)) {
             joinTable.put(factTable, dimTable, new HashSet<>());
+            factTables.add(factTable);
           }
           Set<UnorderedPair<SqlIdentifier>> joinPairSet = joinTable.get(factTable, dimTable);
           joinPairSet.add(keyPair);
         }
       }
 
+      Set<FactDimensionJoin> factDimensionJoinSet = new HashSet<>();
       for (com.google.common.collect.Table.Cell<
               AliasedTable, AliasedTable, Set<UnorderedPair<SqlIdentifier>>>
           cell : joinTable.cellSet()) {
@@ -161,6 +155,73 @@ public class JoinAndPredicateFinder extends SqlShuttle {
               factTable.getTable(), dimTable.getTable(), joinColumnPairs, predicateSet);
         }
         factDimensionJoinSet.add(newFactDimJoin);
+      }
+
+      // replace for each fact table
+      for (AliasedTable factTable : factTables) {
+        Table currentFactTable = factTable.getTable();
+
+        List<PartitionCandidate> candidateList = new ArrayList<>();
+        Map<PartitionCandidate, Set<Predicate>> pcToPredMap = new HashMap<>();
+
+        // Rank partition candidates
+        for (PartitionCandidate candidate : candidates) {
+          candidate.setQueryCost(Long.MAX_VALUE);
+          Set<FactDimensionJoin> joinSet = candidate.getPrejoin().getJoinSet();
+          Set<Column> currentColumnSet = new HashSet<>();
+          Set<Predicate> usedPredicates = new HashSet<>();
+          int multiplier = 1;
+
+          for (FactDimensionJoin join : factDimensionJoinSet) {
+            // if candidate works for the given join...
+            if (join.getFactTable().equals(currentFactTable)) {
+              if (joinSet.contains(join)) {
+                Set<PredicateColumn> usedColumns = candidate.findUsedColumns(join);
+                for (PredicateColumn predicateColumn : usedColumns) {
+                  currentColumnSet.add(predicateColumn.getColumn());
+                  usedPredicates.add(predicateColumn.getPredicate());
+                  multiplier *= predicateColumn.getMultiplier();
+                }
+              }
+            }
+          }
+
+          if (!currentColumnSet.isEmpty()) {
+            PartitionCandidate pcForThisQuery =
+                new PartitionCandidate(candidate.getPrejoin(), currentColumnSet);
+            try {
+              database.calculateStatsForPartitionCandidate(pcForThisQuery);
+            } catch (SQLException e) {
+              e.printStackTrace();
+            }
+            long queryCost = multiplier * pcForThisQuery.getMaxParitionSize();
+            candidate.setQueryCost(queryCost);
+            candidateList.add(candidate);
+            pcToPredMap.put(candidate, usedPredicates);
+          }
+        }
+        candidateList.sort((o1, o2) -> (int) (o1.getQueryCost() - o2.getQueryCost()));
+
+        if (!candidateList.isEmpty()) {
+          PartitionCandidate best = candidateList.get(0);
+          // replace fact table + where clauses
+          SqlNode where = select.getWhere();
+          Set<Predicate> predToReplace = pcToPredMap.get(best);
+
+          PartitionPredicateReplacer predReplacer = new PartitionPredicateReplacer(predToReplace);
+          select.setWhere(where.accept(predReplacer));
+
+          SqlIdentifier newFactTableId =
+              new SqlIdentifier(
+                  Arrays.asList(database.getInnocentDatabase(), best.getPartitionTableName()),
+                  SqlParserPos.ZERO);
+
+          IdReplacer tableReplacer =
+              new IdReplacer(
+                  newFactTableId, (SqlIdentifier) factTable.getTable().getCorrespondingNode());
+          SqlNode from = select.getFrom();
+          select.setFrom(from.accept(tableReplacer));
+        }
       }
       return select;
     }

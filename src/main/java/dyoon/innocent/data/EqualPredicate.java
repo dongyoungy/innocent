@@ -2,23 +2,27 @@ package dyoon.innocent.data;
 
 /** Created by Dong Young Yoon on 2018-12-16. */
 public class EqualPredicate extends Predicate {
-  private double value;
+  private Object value;
 
-  public EqualPredicate(Column column, double value) {
+  private EqualPredicate() {
+    // for JSON
+  }
+
+  public EqualPredicate(Column column, Object value) {
     this.column = column;
     this.value = value;
   }
 
   @Override
   public int hashCode() {
-    return column.hashCode() + Double.hashCode(value);
+    return column.hashCode() + value.hashCode();
   }
 
   @Override
   public boolean equals(Object obj) {
     if (obj instanceof EqualPredicate) {
       EqualPredicate eq = (EqualPredicate) obj;
-      return eq.column.equals(column) && eq.value == value;
+      return eq.column.equals(column) && eq.value.equals(value);
     }
     return false;
   }
@@ -34,14 +38,14 @@ public class EqualPredicate extends Predicate {
 
   @Override
   public String toSql() {
-    return String.format("%s = %f", column.getName(), value);
+    return String.format("%s = %f", column.getName(), value.toString());
   }
 
   public void setColumn(Column column) {
     this.column = column;
   }
 
-  public double getValue() {
+  public Object getValue() {
     return value;
   }
 
@@ -50,15 +54,15 @@ public class EqualPredicate extends Predicate {
   }
 
   // checks whether a given predicate shares same value (and inclusive if it is a range predicate)
-  public boolean isOverlap(Predicate p) {
-    if (p instanceof EqualPredicate) {
-      EqualPredicate eq = (EqualPredicate) p;
-      return eq.getValue() == this.value;
-    } else if (p instanceof RangePredicate) {
-      RangePredicate range = (RangePredicate) p;
-      if (range.getLowerBound() == this.value && range.isLowerInclusive()) return true;
-      else if (range.getUpperBound() == this.value && range.isUpperInclusive()) return true;
-    }
-    return false;
-  }
+  //  public boolean isOverlap(Predicate p) {
+  //    if (p instanceof EqualPredicate) {
+  //      EqualPredicate eq = (EqualPredicate) p;
+  //      return eq.getValue() == this.value;
+  //    } else if (p instanceof RangePredicate) {
+  //      RangePredicate range = (RangePredicate) p;
+  //      if (range.getLowerBound() == this.value && range.isLowerInclusive()) return true;
+  //      else if (range.getUpperBound() == this.value && range.isUpperInclusive()) return true;
+  //    }
+  //    return false;
+  //  }
 }

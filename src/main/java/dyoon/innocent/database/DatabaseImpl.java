@@ -20,6 +20,8 @@ public interface DatabaseImpl {
 
   List<String> getTables() throws SQLException;
 
+  List<String> getTables(String database) throws SQLException;
+
   List<String> getColumns(String table) throws SQLException;
 
   List<String> getColumns(String database, String table) throws SQLException;
@@ -70,4 +72,6 @@ public interface DatabaseImpl {
   String getCurrentTimestamp();
 
   void calculateStatsForPartitionCandidate(PartitionCandidate candidate) throws SQLException;
+
+  Set<PartitionCandidate> getAvailablePartitionedTables() throws SQLException;
 }

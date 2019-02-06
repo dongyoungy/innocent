@@ -156,13 +156,13 @@
         <dependency>
             <groupId>org.apache.calcite</groupId>
             <artifactId>calcite-core</artifactId>
-            <version>1.17.0</version>
+            <version>1.18.0</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/org.apache.calcite/calcite-server -->
         <dependency>
             <groupId>org.apache.calcite</groupId>
             <artifactId>calcite-server</artifactId>
-            <version>1.17.0</version>
+            <version>1.18.0</version>
         </dependency>
 
         <dependency>

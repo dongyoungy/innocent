@@ -9,7 +9,9 @@ public class UnorderedPair<T> {
   private T left;
   private T right;
 
-  public UnorderedPair() {}
+  private UnorderedPair() {
+    // for JSON
+  }
 
   public UnorderedPair(T left, T right) {
     this.left = left;
@@ -23,7 +25,8 @@ public class UnorderedPair<T> {
 
   @Override
   public int hashCode() {
-    return left.hashCode() + right.hashCode();
+    int hash = left.hashCode() + right.hashCode();
+    return hash;
   }
 
   @Override

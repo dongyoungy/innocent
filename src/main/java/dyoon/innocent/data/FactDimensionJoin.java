@@ -20,6 +20,10 @@ public class FactDimensionJoin {
   private Set<Predicate> predicates;
   private Set<Query> querySet;
 
+  private FactDimensionJoin() {
+    // for JSON
+  }
+
   public FactDimensionJoin(
       Table factTable, Table dimensionTable, Set<UnorderedPair<Column>> joinColumns) {
     this.factTable = factTable;
@@ -76,6 +80,10 @@ public class FactDimensionJoin {
 
   public Set<UnorderedPair<Column>> getJoinPairs() {
     return joinColumns;
+  }
+
+  public void setJoinPairs(Set<UnorderedPair<Column>> joinColumns) {
+    this.joinColumns = joinColumns;
   }
 
   public static FactDimensionJoin create(

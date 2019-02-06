@@ -7,7 +7,7 @@ import dyoon.innocent.data.Column;
 import dyoon.innocent.data.PartitionCandidate;
 import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
-import dyoon.innocent.database.DatabaseImpl;
+import dyoon.innocent.database.Database;
 import dyoon.innocent.database.ImpalaDatabase;
 import dyoon.innocent.query.AggNonAggDetector;
 import dyoon.innocent.query.QueryVisitor;
@@ -69,7 +69,7 @@ public class Main {
     // set log level
     Configurator.currentConfig().level(Level.DEBUG).activate();
 
-    DatabaseImpl database = new ImpalaDatabase(host, db, innocentDatabase, user, password);
+    Database database = new ImpalaDatabase(host, db, innocentDatabase, user, password);
     Data data = new Data();
     InnocentEngine engine = new InnocentEngine(database, args, timestamp);
     File current;
@@ -243,7 +243,7 @@ public class Main {
               String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
               sql = sql.replaceAll(";", "");
 
-              //              if (!id.equalsIgnoreCase("query13")) {
+              //              if (!id.equalsIgnoreCase("query17")) {
               //                continue;
               //              }
 
@@ -271,13 +271,47 @@ public class Main {
         Set<Prejoin> prejoins = engine.buildPrejoins();
 
         // calculate necessary stats for predicate columns in prejoins
-        Set<PartitionCandidate> candidates = engine.createPartitionCandidates(prejoins, 100000);
+        Set<PartitionCandidate> candidates =
+            engine.createPartitionCandidates(prejoins, args.getMaxPartitionsPerTable());
 
-        Set<PartitionCandidate> bestPartitionGreedy = engine.findBestPartitionGreedy(candidates, 0.01, 3);
+        Set<PartitionCandidate> bestPartitionGreedy =
+            engine.findBestPartitionGreedy(
+                candidates, args.getPrejoinSampleRatio(), args.getPartitionBudget());
 
-        engine.buildPartitions(bestPartitionGreedy);
+        if (args.isCreate()) {
+          engine.buildPartitions(bestPartitionGreedy);
+        }
+      } else if (args.isTestPartition()) {
 
-        System.out.println();
+        Set<Query> allQueries = new HashSet<>();
+        for (File file : queryFiles) {
+          if (file.isFile()) {
+            String queryFilename = file.getName();
+            if (queryFilename.endsWith("sql")) {
+              String id = Files.getNameWithoutExtension(queryFilename);
+              String sql = Files.asCharSource(file, Charset.defaultCharset()).read();
+              sql = sql.replaceAll(";", "");
+
+              if (!id.equalsIgnoreCase("query19")) {
+                continue;
+              }
+
+              String logFile = String.format("./log/%s/%s.log", timestamp, id);
+
+              Configurator.currentConfig()
+                  .writer(new ConsoleWriter(), Level.DEBUG)
+                  .addWriter(new FileWriter(logFile), Level.DEBUG)
+                  .addWriter(new FileWriter(defalutLogFile), Level.DEBUG)
+                  .activate();
+
+              Query q = new Query(id, sql);
+              allQueries.add(q);
+
+              engine.runQueryWithBestPartition(q);
+            }
+          }
+        }
+
       } else {
 
         if (args.getFactTables().isEmpty()) {

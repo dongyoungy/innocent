@@ -71,4 +71,12 @@ public abstract class Database implements DatabaseImpl {
       e.printStackTrace();
     }
   }
+
+  public String getSourceDatabase() {
+    return sourceDatabase;
+  }
+
+  public String getInnocentDatabase() {
+    return innocentDatabase;
+  }
 }

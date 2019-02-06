@@ -1,6 +1,7 @@
 package dyoon.innocent;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Stopwatch;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Sets;
 import com.google.common.math.Stats;
@@ -11,16 +12,17 @@ import dyoon.innocent.data.Join;
 import dyoon.innocent.data.PartitionCandidate;
 import dyoon.innocent.data.PartitionSpace;
 import dyoon.innocent.data.Predicate;
+import dyoon.innocent.data.PredicateColumn;
 import dyoon.innocent.data.Prejoin;
 import dyoon.innocent.data.Table;
 import dyoon.innocent.data.UnorderedPair;
 import dyoon.innocent.database.Database;
-import dyoon.innocent.database.DatabaseImpl;
 import dyoon.innocent.lp.ILPSolver;
 import dyoon.innocent.query.AggregationColumnResolver;
 import dyoon.innocent.query.AliasReplacer;
 import dyoon.innocent.query.ErrorPropagator;
 import dyoon.innocent.query.JoinAndPredicateFinder;
+import dyoon.innocent.query.PartitionTableReplacer;
 import dyoon.innocent.query.QueryTransformer;
 import dyoon.innocent.query.QueryVisitor;
 import org.apache.calcite.sql.SqlDialect;
@@ -34,6 +36,7 @@ import org.apache.calcite.sql.dialect.HiveSqlDialect;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.checkerframework.checker.nullness.compatqual.NullableDecl;
 import org.pmw.tinylog.Logger;
@@ -50,9 +53,11 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 
 /** Created by Dong Young Yoon on 10/19/18. */
 public class InnocentEngine {
@@ -78,10 +83,13 @@ public class InnocentEngine {
   private Args args;
   private String timeCreated;
   private boolean isSampleUsed = false;
-  private DatabaseImpl database;
+  private Database database;
   private Map<String, Double> origRunTimeCache;
 
   // for partition analysis
+  private static final int MAX_COLUMN_PER_PREJOIN = 12;
+  private static final int MAX_COLUMN_PER_TABLE = 3;
+
   private static final double DEFAULT_PREJOIN_UNIFORM_RATIO = 0.01;
   private Set<Table> factTableSet;
   private Set<Table> ignoreFactTableSet;
@@ -95,7 +103,7 @@ public class InnocentEngine {
 
   private Set<FactDimensionJoin> factDimensionJoinSet;
 
-  public InnocentEngine(DatabaseImpl database, Args args, String timestamp) {
+  public InnocentEngine(Database database, Args args, String timestamp) {
     this.database = database;
     this.isSampleUsed = false;
     this.timeCreated = timestamp;
@@ -111,6 +119,13 @@ public class InnocentEngine {
     this.predicateColumnFreqTable = new HashMap<>();
 
     this.factDimensionJoinSet = new HashSet<>();
+
+    try {
+      allTables = database.getAllTableAndColumns(args.getDatabase());
+    } catch (SQLException e) {
+      e.printStackTrace();
+    }
+    allColumns = Utils.getAllColumns(allTables);
   }
 
   public InnocentEngine() {
@@ -126,6 +141,13 @@ public class InnocentEngine {
     this.allTables = new HashSet<>();
     this.allColumns = new ArrayList<>();
     this.factDimensionJoinSet = new HashSet<>();
+
+    try {
+      allTables = database.getAllTableAndColumns(args.getDatabase());
+    } catch (SQLException e) {
+      e.printStackTrace();
+    }
+    allColumns = Utils.getAllColumns(allTables);
   }
 
   public boolean isSampleUsed() {
@@ -203,11 +225,34 @@ public class InnocentEngine {
     for (Prejoin prejoin : prejoins) {
       // get all predicate columns
       Set<Column> predColumnSet = new HashSet<>();
+      Map<Column, Integer> predColumnFreq = new HashMap<>();
       for (FactDimensionJoin join : prejoin.getJoinSet()) {
         for (Predicate predicate : join.getPredicates()) {
           Column column = predicate.getColumn();
           predColumnSet.add(column);
+          if (!predColumnFreq.containsKey(column)) {
+            predColumnFreq.put(column, 1);
+          } else {
+            int freq = predColumnFreq.get(column);
+            predColumnFreq.put(column, freq + 1);
+          }
         }
+      }
+
+      PriorityQueue<Pair<Column, Integer>> predColumnQueue =
+          new PriorityQueue<>(predColumnSet.size(), (o1, o2) -> o2.getRight() - o1.getRight());
+
+      for (Map.Entry<Column, Integer> entry : predColumnFreq.entrySet()) {
+        predColumnQueue.add(ImmutablePair.of(entry.getKey(), entry.getValue()));
+      }
+
+      predColumnSet.clear();
+
+      int numCol = 0;
+      while (numCol < MAX_COLUMN_PER_PREJOIN && !predColumnQueue.isEmpty()) {
+        Pair<Column, Integer> pair = predColumnQueue.poll();
+        predColumnSet.add(pair.getLeft());
+        ++numCol;
       }
 
       for (Column column : predColumnSet) {
@@ -245,7 +290,17 @@ public class InnocentEngine {
       //        candidates.add(candidate);
       //      }
 
-      Set<Set<Column>> columnPowerSet = Sets.powerSet(predColumnSet);
+      //      Set<Set<Column>> powerSet = Sets.powerSet(predColumnSet);
+      Set<Set<Column>> columnPowerSet = new HashSet<>();
+      //      for (Set<Column> columns : powerSet) {
+      //        if (columns.size() < 4) {
+      //          columnPowerSet.add(columns);
+      //        }
+      //      }
+
+      for (int i = 1; i <= MAX_COLUMN_PER_TABLE; ++i) {
+        columnPowerSet.addAll(Sets.combinations(predColumnSet, i));
+      }
 
       // filter ones that have too many partitions
       MaxPartitionPredicate maxPartitionPredicate =
@@ -269,15 +324,57 @@ public class InnocentEngine {
     }
   }
 
+  public void runQueryWithBestPartition(Query q) throws SQLException, SqlParseException {
+    Set<PartitionCandidate> availablePartitionedTables =
+        this.database.getAvailablePartitionedTables();
+
+    if (this.allTables.isEmpty()) {
+      allTables = database.getAllTableAndColumns(args.getDatabase());
+      allColumns = Utils.getAllColumns(allTables);
+    }
+
+    SqlParser sqlParser = SqlParser.create(q.getQuery());
+    SqlNode node = sqlParser.parseQuery();
+    String[] factTables = args.getFactTables().split(",");
+    String[] ignoreFactTables = args.getIgnoreFactTables().split(",");
+    this.factTableSet = Utils.getTableSetWithNames(allTables, factTables);
+    this.ignoreFactTableSet = Utils.getTableSetWithNames(allTables, ignoreFactTables);
+
+    allQueries.add(q);
+
+    PartitionTableReplacer replacer =
+        new PartitionTableReplacer(
+            database,
+            q,
+            allTables,
+            allColumns,
+            availablePartitionedTables,
+            factTableSet,
+            ignoreFactTableSet);
+
+    SqlNode newNode = node.accept(replacer);
+
+    SqlDialect dialect = new HiveSqlDialect(SqlDialect.EMPTY_CONTEXT);
+    String sql = newNode.toSqlString(dialect).getSql();
+    sql = sql.replaceAll("FETCH NEXT ", "LIMIT ");
+    sql = sql.replaceAll("ROWS ONLY", "");
+
+    Stopwatch watch = Stopwatch.createStarted();
+    database.executeQuery(sql);
+    watch.stop();
+
+    System.out.println(
+        String.format(
+            "Elapsed = %.3f s", (double) watch.elapsed(TimeUnit.MILLISECONDS) / (double) 1000));
+  }
+
   public Set<PartitionCandidate> findBestPartitionGreedy(
       Set<PartitionCandidate> candidates, double targetIOBound, int size) throws SQLException {
     Set<PartitionCandidate> bestPartitions = new HashSet<>();
     Set<PartitionCandidate> candidatesToConsider = new HashSet<>(candidates);
     SortedSet<Query> queriesToConsider = new TreeSet<>(this.allQueries);
 
-    Map<PartitionCandidate, Integer> candidateQuality = new HashMap<>();
-    Map<PartitionCandidate, Double> candidateTotalIOReduction = new HashMap<>();
-
+    int rank = 1;
     while (bestPartitions.size() < size) {
 
       for (PartitionCandidate candidate : candidatesToConsider) {
@@ -290,32 +387,52 @@ public class InnocentEngine {
                   com.google.common.collect.Table<
                       Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
               predicateTableMap = query.getPredicateTableMap();
-          Set<Column> usedColumnSet = findUsedColumnSet(candidate, predicateTableMap);
+          Set<PredicateColumn> usedColumnSet = findUsedColumnSet(candidate, predicateTableMap);
           if (!usedColumnSet.isEmpty()) {
+            Set<Column> currentColumnSet = new HashSet<>();
+            int multiplier = 1;
+            for (PredicateColumn predicateColumn : usedColumnSet) {
+              currentColumnSet.add(predicateColumn.getColumn());
+              multiplier *= predicateColumn.getMultiplier();
+            }
+
             PartitionCandidate pcForThisQuery =
-                new PartitionCandidate(candidate.getPrejoin(), usedColumnSet);
+                new PartitionCandidate(candidate.getPrejoin(), currentColumnSet);
             database.calculateStatsForPartitionCandidate(pcForThisQuery);
 
             long reducedQueryCost = 0;
             long queryCost = 0;
             for (AliasedTable table : query.getTables()) {
               if (factTableSet.contains(table.getTable())) {
-                queryCost += this.database.getTableSize(table.getTable());
+                long tableSize = this.database.getTableSize(table.getTable());
+                Table fact = table.getTable();
+                query.setCostIfNull(fact, tableSize);
+                query.setReducedCostIfNull(fact, tableSize);
+
+                queryCost += query.getCost(fact);
+                long currentReducedCost = query.getReducedCost(fact);
                 if (candidate.getPrejoin().getFactTable().equals(table.getTable())) {
-                  reducedQueryCost += pcForThisQuery.getMaxParitionSize();
+                  long reducedCost = (multiplier * pcForThisQuery.getMaxParitionSize());
+
+                  if (reducedCost < currentReducedCost) {
+                    candidate.setQueryCost(query, table.getTable(), reducedCost);
+                  } else {
+                    reducedCost = currentReducedCost;
+                  }
+                  reducedQueryCost += reducedCost;
                 } else {
-                  reducedQueryCost += this.database.getTableSize(table.getTable());
+                  reducedQueryCost += currentReducedCost;
                 }
               }
             }
-            query.setCost(queryCost);
 
             double reducedIO = (double) reducedQueryCost / (double) queryCost;
             if (reducedIO < targetIOBound) {
               ++numQueryWithTargetIOBound;
               candidate.addQuery(query);
-            } else {
+            } else if (reducedIO < 1) {
               totalIOReduction += (1 - reducedIO);
+              candidate.addEffectiveQuery(query);
             }
           }
         }
@@ -338,18 +455,28 @@ public class InnocentEngine {
           });
 
       PartitionCandidate best = pcList.get(0);
+      best.setIOBound(targetIOBound);
+      best.setRank(rank++);
+
       bestPartitions.add(best);
       candidatesToConsider.remove(best);
       queriesToConsider.removeAll(best.getQueriesMeetingIOBounds());
+
+      for (com.google.common.collect.Table.Cell<Query, Table, Long> cell :
+          best.getQueryCostTable().cellSet()) {
+        Query q = cell.getRowKey();
+        assert q != null;
+        q.setReducedCost(cell.getColumnKey(), cell.getValue());
+      }
     }
     return bestPartitions;
   }
 
-  private Set<Column> findUsedColumnSet(
+  private Set<PredicateColumn> findUsedColumnSet(
       PartitionCandidate candidate,
       Map<Table, com.google.common.collect.Table<Table, Set<UnorderedPair<Column>>, Set<Predicate>>>
           predicateTableMap) {
-    Set<Column> usedColumns = new HashSet<>();
+    Set<PredicateColumn> usedColumns = new HashSet<>();
     for (Table fact : predicateTableMap.keySet()) {
       for (com.google.common.collect.Table.Cell<Table, Set<UnorderedPair<Column>>, Set<Predicate>>
           cell : predicateTableMap.get(fact).cellSet()) {
@@ -357,7 +484,8 @@ public class InnocentEngine {
         Set<UnorderedPair<Column>> joinColumns = cell.getColumnKey();
         Set<Predicate> predicates = cell.getValue();
 
-        Set<Column> columns = candidate.findUsedColumns(fact, dim, joinColumns, predicates);
+        Set<PredicateColumn> columns =
+            candidate.findUsedColumns(fact, dim, joinColumns, predicates);
         usedColumns.addAll(columns);
       }
     }

@@ -347,8 +347,52 @@ public class Utils {
     return new RangePredicate(col, val, Double.POSITIVE_INFINITY, true, false);
   }
 
+  public static Predicate buildLessThanPredicate(
+      List<Column> allColumns, SqlIdentifier id, Object val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(
+        col, Double.NEGATIVE_INFINITY, Double.valueOf(val.toString()), false, false);
+  }
+
+  public static Predicate buildLessThanEqualPredicate(
+      List<Column> allColumns, SqlIdentifier id, Object val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(
+        col, Double.NEGATIVE_INFINITY, Double.valueOf(val.toString()), false, true);
+  }
+
+  public static Predicate buildGreaterThanPredicate(
+      List<Column> allColumns, SqlIdentifier id, Object val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(
+        col, Double.valueOf(val.toString()), Double.POSITIVE_INFINITY, false, false);
+  }
+
+  public static Predicate buildGreaterThanEqualPredicate(
+      List<Column> allColumns, SqlIdentifier id, Object val) {
+    Column col = Utils.findColumnById(allColumns, id);
+    if (col == null) {
+      Logger.warn("Column not found with id = {}", id.getSimple());
+      return null;
+    }
+    return new RangePredicate(
+        col, Double.valueOf(val.toString()), Double.POSITIVE_INFINITY, true, false);
+  }
+
   public static Predicate buildEqualPredicate(
-      List<Column> allColumns, SqlIdentifier id, Double val) {
+      List<Column> allColumns, SqlIdentifier id, Object val) {
     Column col = Utils.findColumnById(allColumns, id);
     if (col == null) {
       Logger.warn("Column not found with id = {}", id.getSimple());

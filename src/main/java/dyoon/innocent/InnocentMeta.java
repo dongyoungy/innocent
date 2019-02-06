@@ -39,11 +39,13 @@ public class InnocentMeta {
   }
 
   private void initialize() {
-    String sql =
+    String sql = String.format("CREATE DATABASE IF NOT EXISTS %s", database);
+    databaseImpl.execute(sql);
+
+    sql =
         String.format(
             "CREATE TABLE IF NOT EXISTS %s.%s " + "(key string, val string, ts timestamp)",
             database, META_TABLE_NAME);
-
     databaseImpl.execute(sql);
 
     // read metadata into cache in memory

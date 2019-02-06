@@ -6,7 +6,6 @@ import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Joiner;
 import dyoon.innocent.Query;
 
 import java.io.IOException;
@@ -22,6 +21,10 @@ public class Prejoin {
   private Set<FactDimensionJoin> joinSet;
   private Set<Query> queries;
   private double sampleRatio;
+
+  private Prejoin() {
+    // for JSON
+  }
 
   public Prejoin(Table factTable) {
     this.factTable = factTable;
@@ -134,10 +137,11 @@ public class Prejoin {
     }
     String name =
         String.format(
-            "prejoin___%s___%.4f___%s___%d",
+            "prejoin___%s___%.4f___%d___%d",
             factTable.getName(),
             sampleRatio,
-            Joiner.on("__").join(tableNames),
+            Math.abs(tableNames.hashCode()),
+            //            Joiner.on("__").join(tableNames),
             Math.abs(joinSet.hashCode()));
     return name.replaceAll("\\.", "_");
   }

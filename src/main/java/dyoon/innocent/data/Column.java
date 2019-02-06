@@ -12,7 +12,9 @@ public class Column {
   private String type;
   private long numDistinctValues;
 
-  public Column() {}
+  private Column() {
+    // for JSON
+  }
 
   public Column(Table table, String name, String type) {
     this.table = table.getName();
@@ -76,6 +78,10 @@ public class Column {
 
   @Override
   public boolean equals(Object obj) {
-    return super.equals(obj);
+    if (obj instanceof Column) {
+      Column other = (Column) obj;
+      return table.equals(other.table) && name.equals(other.name) && type.equals(other.type);
+    }
+    return false;
   }
 }

@@ -10,6 +10,10 @@ public class InPredicate extends Predicate {
 
   private List<Object> values;
 
+  private InPredicate() {
+    // for JSON
+  }
+
   public InPredicate(Column col) {
     this.column = col;
     this.values = new ArrayList<>();
@@ -17,6 +21,10 @@ public class InPredicate extends Predicate {
 
   public void addValue(Object val) {
     values.add(val);
+  }
+
+  public List<Object> getValues() {
+    return values;
   }
 
   @Override

@@ -1,7 +1,7 @@
 package dyoon.innocent.data;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import org.apache.calcite.sql.SqlNode;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -10,8 +10,12 @@ import java.util.Set;
 public class Table implements Comparable<Table> {
 
   protected String name;
-  @JsonIgnore
-  protected Set<Column> columns;
+  @JsonIgnore protected Set<Column> columns;
+  @JsonIgnore protected SqlNode correspondingNode;
+
+  private Table() {
+    // for JSON
+  }
 
   public Table(String name) {
     this.name = name;
@@ -60,6 +64,14 @@ public class Table implements Comparable<Table> {
 
   public Set<Column> getColumns() {
     return columns;
+  }
+
+  public SqlNode getCorrespondingNode() {
+    return correspondingNode;
+  }
+
+  public void setCorrespondingNode(SqlNode correspondingNode) {
+    this.correspondingNode = correspondingNode;
   }
 
   @Override
