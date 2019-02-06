@@ -124,7 +124,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
   }
 
   @Override
-  public void buildPartitionTable(PartitionCandidate candidate) throws SQLException {
+  public void buildPartitionTable(PartitionCandidate candidate, boolean overwrite) throws SQLException {
     Prejoin prejoin = candidate.getPrejoin();
     Set<Column> columnSet = candidate.getColumnSet();
     Set<FactDimensionJoin> joinSet = prejoin.getJoinSet();
@@ -159,13 +159,22 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
 
     String partitionedTableName = candidate.getPartitionTableName();
 
-    if (checkTableExists(this.innocentDatabase, partitionedTableName)) {
+    if (!overwrite && checkTableExists(this.innocentDatabase, partitionedTableName)) {
       Logger.info(
           "Partitioned table '{}.{}' already exists", this.innocentDatabase, partitionedTableName);
 
       // update metadata nonetheless
       this.meta.put(partitionedTableName, PartitionCandidate.getJsonString(candidate));
       return;
+    }
+
+    if (overwrite) {
+      String dropSql =
+          String.format(
+              "DROP TABLE IF EXISTS %s.%s",
+              this.innocentDatabase,
+              partitionedTableName);
+      this.execute(dropSql);
     }
 
     Set<Column> factTableColumns = factTable.getColumns();
@@ -435,7 +444,7 @@ public class ImpalaDatabase extends Database implements DatabaseImpl {
     String prejoinTableName = prejoin.getPrejoinTableName();
     double sampleRatio = prejoin.getSampleRatio();
 
-    List<String> groupByColumns = new ArrayList<>();
+    SortedSet<String> groupByColumns = new TreeSet<>();
     for (Column column : columnSet) {
       groupByColumns.add(column.getName());
     }

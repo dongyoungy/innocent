@@ -45,7 +45,7 @@ public interface DatabaseImpl {
   void constructPrejoinWithUniformSample(
       String targetDatabase, String sourceDatabase, Prejoin p, double ratio) throws SQLException;
 
-  void buildPartitionTable(PartitionCandidate candidate) throws SQLException;
+  void buildPartitionTable(PartitionCandidate candidate, boolean overwrite) throws SQLException;
 
   long getMaxGroupSize(String table, Set<String> groupBys) throws SQLException;
 

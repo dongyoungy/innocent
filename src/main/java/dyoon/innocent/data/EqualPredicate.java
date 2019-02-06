@@ -1,7 +1,11 @@
 package dyoon.innocent.data;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /** Created by Dong Young Yoon on 2018-12-16. */
 public class EqualPredicate extends Predicate {
+
+  @JsonIgnore
   private Object value;
 
   private EqualPredicate() {

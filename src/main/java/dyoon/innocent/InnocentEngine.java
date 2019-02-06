@@ -324,7 +324,7 @@ public class InnocentEngine {
 
   public void buildPartitions(Set<PartitionCandidate> candidates) throws SQLException {
     for (PartitionCandidate candidate : candidates) {
-      this.database.buildPartitionTable(candidate);
+      this.database.buildPartitionTable(candidate, args.isOverwrite());
     }
   }
 
