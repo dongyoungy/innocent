@@ -298,7 +298,7 @@ public class InnocentEngine {
       //        }
       //      }
 
-      for (int i = 1; i <= MAX_COLUMN_PER_TABLE; ++i) {
+      for (int i = 1; i <= MAX_COLUMN_PER_TABLE && i <= predColumnSet.size(); ++i) {
         columnPowerSet.addAll(Sets.combinations(predColumnSet, i));
       }
 
