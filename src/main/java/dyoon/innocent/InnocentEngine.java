@@ -87,8 +87,8 @@ public class InnocentEngine {
   private Map<String, Double> origRunTimeCache;
 
   // for partition analysis
-  private static final int MAX_COLUMN_PER_PREJOIN = 12;
-  private static final int MAX_COLUMN_PER_TABLE = 3;
+  private static final int MAX_COLUMN_TO_CONSIDER_PER_FACT_TABLE = 15;
+  private static final int MAX_COLUMN_PER_PARTITIONED_TABLE = 3;
 
   private static final double DEFAULT_PREJOIN_UNIFORM_RATIO = 0.01;
   private Set<Table> factTableSet;
@@ -253,7 +253,7 @@ public class InnocentEngine {
       predColumnSet.clear();
 
       int numCol = 0;
-      while (numCol < MAX_COLUMN_PER_PREJOIN && !predColumnQueue.isEmpty()) {
+      while (numCol < MAX_COLUMN_TO_CONSIDER_PER_FACT_TABLE && !predColumnQueue.isEmpty()) {
         Pair<Column, Integer> pair = predColumnQueue.poll();
         predColumnSet.add(pair.getLeft());
         ++numCol;
@@ -302,7 +302,7 @@ public class InnocentEngine {
       //        }
       //      }
 
-      for (int i = 1; i <= MAX_COLUMN_PER_TABLE && i <= predColumnSet.size(); ++i) {
+      for (int i = 1; i <= MAX_COLUMN_PER_PARTITIONED_TABLE && i <= predColumnSet.size(); ++i) {
         columnPowerSet.addAll(Sets.combinations(predColumnSet, i));
       }
 
